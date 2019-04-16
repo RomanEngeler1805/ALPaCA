@@ -34,6 +34,9 @@ class QNetwork():
     def eGreedyAction(self):
         ''' select next action according to epsilon-greedy algorithm '''
 
+    def Boltzmann(self):
+        ''' select next action according to Boltzmann '''
+
     def GreedyAction(self):
         ''' select next action greedily '''
 
@@ -55,7 +58,7 @@ class square_environment():
         ''' determine termination of MDP '''
 
     def step(self):
-        ''' interact with environment and return observation [o, r, d] '''
+        ''' interact with environment and return observation [s', r, d] '''
 
 # log file
 # parser file
