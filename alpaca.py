@@ -129,10 +129,10 @@ class QNetwork():
 
         #
         Qmax = self.predict(self.phi_next)
-        max_action = tf.argmax(Qmax, axis=1)
-        self.Qtarget = self.reward+ tf.multiply(tf.gather(Qmax, max_action), self.termination)
-
-        #self.Qtarget = tf.placeholder(tf.float32, shape=[None], name='qmax') # R+ Q(s', argmax_a Q(s',a))
+        max_action = tf.one_hot(tf.argmax(Qmax, axis=1), self.action_dim, dtype=tf.float32)
+        Qmax = tf.reduce_sum(tf.multiply(Qmax, max_action), axis=1)
+        # last factor to account for case that s is terminating state
+        self.Qtarget = self.reward+ FLAGS.gamma* tf.multiply(Qmax, 1-self.termination)
 
         # TODO: perform these operations for a batch
         # loss function
@@ -306,15 +306,16 @@ with tf.Session() as sess:
                 done_train[k] = d
 
             # update posterior
-            Qval = sess.run(QNet.Qout, feed_dict={QNet.x: next_state_train}) # feed with s' -> Q(s',a')
-            Qmax = Qval[range(FLAGS.batch_size), np.argmax(Qval,axis=1)] # Q(s', argmax_a Q(s',a))
+            #Qval = sess.run(QNet.Qout, feed_dict={QNet.x: next_state_train}) # feed with s' -> Q(s',a')
+            #Qmax = Qval[range(FLAGS.batch_size), np.argmax(Qval,axis=1)] # Q(s', argmax_a Q(s',a))
 
             # last factor to account for case that s is terminating state
-            Qtarget = reward_train+ FLAGS.gamma* Qmax* (1- done_train) # Q(s,a) = R + gamma* Q(s', argmax_a Q(s',a))
+            #Qtarget = reward_train+ FLAGS.gamma* Qmax* (1- done_train) # Q(s,a) = R + gamma* Q(s', argmax_a Q(s',a))
 
             _, loss_summary = sess.run([QNet.updateModel, QNet.loss_summary],
                                        feed_dict={QNet.x: state_train, QNet.x_next: next_state_train,
                                                   QNet.action: action_train, QNet.reward: reward_train,  QNet.termination: done_train})
+
 
             # update summary
             summary_writer.add_summary(loss_summary, global_index)
