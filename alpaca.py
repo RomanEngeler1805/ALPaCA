@@ -61,10 +61,10 @@ class QNetwork():
             hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.relu)
 
             # TODO: what dimensions should hidden layer have? [batch, latent space, actions]
-            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.relu)
+            #hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.relu)
 
-            # hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim* self.action_dim, activation_fn=tf.nn.relu)
-            # hidden2 = tf.reshape(hidden2, [-1, self.hidden_dim, self.action_dim])
+            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim* self.action_dim, activation_fn=tf.nn.relu)
+            hidden2 = tf.reshape(hidden2, [-1, self.hidden_dim, self.action_dim])
 
         return hidden2
 
@@ -73,12 +73,12 @@ class QNetwork():
 
         with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             # TODO: matmul of latent space with weights to get output. What about bias?
-            # Wout = tf.get_variable('wout', shape=[1, self.hidden_dim, 1], dtype=tf.float32, )
-            # W = tf.tile(Wout, [1, 1, self.action_dim])  # [input, latent space, action space, output space]
+            Wout = tf.get_variable('wout', shape=[1, self.hidden_dim, 1], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+            W = tf.tile(Wout, [1, 1, self.action_dim])  # [input, latent space, action space, output space]
             # TODO: is this correct? check flow in graph
-            # output = tf.nn.relu(tf.einsum('ijk,mjk->ik', phi, W))
+            output = tf.nn.relu(tf.einsum('ijk,mjk->ik', phi, W))
 
-            output = tf.contrib.layers.fully_connected(phi, num_outputs=self.action_dim, activation_fn=None)
+            #output = tf.contrib.layers.fully_connected(phi, num_outputs=self.action_dim, activation_fn=None)
 
         return output
 
@@ -143,10 +143,22 @@ class QNetwork():
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
-        self.updateModel = self.optimizer.minimize(self.loss)
+        grads_and_vars = self.optimizer.compute_gradients(self.loss)
+        self.updateModel = self.optimizer.apply_gradients(grads_and_vars)
 
         # summary
-        self.loss_summary = tf.summary.scalar('loss', self.loss)
+        loss_summary = tf.summary.scalar('loss', self.loss)
+
+
+        # Keep track of gradient values and sparsity (optional)
+        grad_summaries = []
+        for g, v in grads_and_vars:
+            if g is not None:
+                grad_hist_summary = tf.summary.histogram("/grad/hist/%s" % v.name, g)
+                grad_summaries.append(grad_hist_summary)
+
+        self.summaries_merged = tf.summary.merge([grad_summaries, loss_summary])
+
 
     def update_prior(self):
         ''' update prior parameters (w_bar_0, Sigma_0, Theta) via GD '''
@@ -312,13 +324,12 @@ with tf.Session() as sess:
             # last factor to account for case that s is terminating state
             #Qtarget = reward_train+ FLAGS.gamma* Qmax* (1- done_train) # Q(s,a) = R + gamma* Q(s', argmax_a Q(s',a))
 
-            _, loss_summary = sess.run([QNet.updateModel, QNet.loss_summary],
+            _, summaries_merged = sess.run([QNet.updateModel, QNet.summaries_merged],
                                        feed_dict={QNet.x: state_train, QNet.x_next: next_state_train,
                                                   QNet.action: action_train, QNet.reward: reward_train,  QNet.termination: done_train})
 
-
             # update summary
-            summary_writer.add_summary(loss_summary, global_index)
+            summary_writer.add_summary(summaries_merged, global_index)
             summary_writer.flush()
 
             # update state, and counters
