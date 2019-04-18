@@ -15,13 +15,15 @@ class square_environment():
         self.d = 0
 
         # initialize target
-        target_x = (self.size-1) * np.random.randint(0, 2)
-        target_y = (self.size-1) * np.random.randint(0, 2)
+        target_x = 2#(self.size-1) * np.random.randint(0, 2)
+        target_y = 0#(self.size-1) * np.random.randint(0, 2)
         self.target = np.array([target_x, target_y])
 
     def reset(self):
         ''' reset the environment to its initial state '''
         self.__init__()
+
+        return self.state.flatten()
 
     def reward(self):
         ''' reward function '''
@@ -39,8 +41,6 @@ class square_environment():
     def step(self, action):
         '''
         interact with environment and return observation [s', r, d]
-
-
         '''
 
         # update position

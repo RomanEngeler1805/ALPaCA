@@ -17,24 +17,22 @@ tf.flags.DEFINE_integer("batch_size", 4, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 4, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 16, "Dimensionality of hidden space")
-tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
-tf.flags.DEFINE_float("learning_rate", 0.9, "Initial learning rate")
+tf.flags.DEFINE_float("gamma", 0.8, "Discount factor")
+tf.flags.DEFINE_float("learning_rate", 0.001, "Initial learning rate")
 tf.flags.DEFINE_float("noise_variance", 0.1, "Noise variance")
-tf.flags.DEFINE_integer("N_episodes", 1000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 10000, "Number of episodes")
 tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
 print("\nParameters:")
-for attr, value in sorted(FLAGS.__flags.items()):
-    print("{}={}".format(attr.upper(), value))
+for key in FLAGS.__flags.keys():
+    print("{}={}".format(key, getattr(FLAGS, key)))
 print("")
 
-
-
 class QNetwork():
-    def __init__(self, scope="QNetwork", summaries_dir="summaries"):
+    def __init__(self, scope="QNetwork", summaries_dir="./"):
         self.gamma = FLAGS.gamma
         self.action_dim = FLAGS.action_space
         self.state_dim = FLAGS.state_space
@@ -62,8 +60,10 @@ class QNetwork():
             hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.relu)
 
             # TODO: what dimensions should hidden layer have? [batch, latent space, actions]
-            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim* self.action_dim, activation_fn=tf.nn.relu)
-            hidden2 = tf.reshape(hidden2, [-1, self.hidden_dim, self.action_dim])
+            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.relu)
+
+            # hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim* self.action_dim, activation_fn=tf.nn.relu)
+            # hidden2 = tf.reshape(hidden2, [-1, self.hidden_dim, self.action_dim])
 
         return hidden2
 
@@ -72,10 +72,12 @@ class QNetwork():
 
         with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             # TODO: matmul of latent space with weights to get output. What about bias?
-            Wout = tf.get_variable('wout', shape=[1, self.hidden_dim, 1], dtype=tf.float32, )
-            W = tf.tile(Wout, [1, 1, self.action_dim])  # [input, latent space, action space, output space]
+            # Wout = tf.get_variable('wout', shape=[1, self.hidden_dim, 1], dtype=tf.float32, )
+            # W = tf.tile(Wout, [1, 1, self.action_dim])  # [input, latent space, action space, output space]
             # TODO: is this correct? check flow in graph
-            output = tf.nn.relu(tf.einsum('ijk,mjk->ik', phi, W))
+            # output = tf.nn.relu(tf.einsum('ijk,mjk->ik', phi, W))
+
+            output = tf.contrib.layers.fully_connected(phi, num_outputs=self.action_dim, activation_fn=None)
 
         return output
 
@@ -187,22 +189,20 @@ def eGreedyAction(x, epsilon=0.9):
 
 # ==========================================================================================
 
-# variables
+# epsilon-greedy
 eps = 0.9
-deps = eps/ 1e3
-
+deps = (eps- 0.1)/ FLAGS.N_episodes
 
 # initialize replay memory and model
-rbuffer = replay_buffer(FLAGS.replay_memory_size)
-tempbuffer = replay_buffer(FLAGS.L_episode)
-QNet = QNetwork()
+rbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
+tempbuffer = replay_buffer(FLAGS.L_episode) # buffer for episode
+QNet = QNetwork() # neural network
 
 # initialize environment
 env = square_environment()
 
 # session
 init = tf.global_variables_initializer()
-
 with tf.Session() as sess:
     sess.run(init)
 
@@ -213,24 +213,23 @@ with tf.Session() as sess:
     # populate replay memory
     print("Populating replay memory...")
     state = env.reset()
-    print('Target position: ' + str(env.target))
 
     for i in range(FLAGS.replay_memory_size):
 
-        Qval = sess.run(QNet.Qout, feed_dict={QNet.x: state.reshape(1,-1)})
-        action = eGreedyAction(Qval)
-        next_state, reward, done = env.step(action)
-        rbuffer.add(state, action, reward, next_state, done)
+        Qval = sess.run(QNet.Qout, feed_dict={QNet.x: state.reshape(1,-1)}) # evaluate Q-fcn for state
+        action = eGreedyAction(Qval) # pick epsilon-greedy action
+        next_state, reward, done = env.step(action) # observe environment
+        rbuffer.add(state, action, reward, next_state, done) # store experience
 
         if done:
             state = env.reset()
         else:
             state = next_state
 
-
-    global_index = 0
-    step_count = []
-    state_count = []
+    print('Target position: ' + str(env.target) +' (vertical, horizontal)') # not yet changing
+    global_index = 0 # counter
+    step_count = [] # count steps required to accomplish task
+    state_count = [] # count number of visitations of each state
 
     # loop episodes
     print("Episodes...")
@@ -248,11 +247,10 @@ with tf.Session() as sess:
             action = eGreedyAction(Qval, eps)
             next_state, reward, done = env.step(action)
 
-            # TODO: possibly have additional buffer for current episode which is appended at the end to larger buffer
             # store memory
             tempbuffer.add(state, action, reward, next_state, done)
 
-            # sample from larger buffer [s, a, r, s', d]
+            # sample from larger buffer [s, a, r, s', d] with current experience not yet included
             experience = rbuffer.sample(FLAGS.batch_size)
 
             state_train = np.zeros((FLAGS.batch_size, FLAGS.state_space))
@@ -269,50 +267,58 @@ with tf.Session() as sess:
                 done_train[k] = d
 
             # update posterior
-            Qval = sess.run(QNet.Qout, feed_dict={QNet.x: state_train}) # feed with s' -> Q(s',a')
+            Qval = sess.run(QNet.Qout, feed_dict={QNet.x: next_state_train}) # feed with s' -> Q(s',a')
             Qmax = Qval[range(FLAGS.batch_size), np.argmax(Qval,axis=1)] # Q(s', argmax_a Q(s',a))
 
-            # TODO: last factor to account for case that s' is terminating state -> necessary?
+            # last factor to account for case that s is terminating state
             Qtarget = reward_train+ FLAGS.gamma* Qmax* (1- done_train) # Q(s,a) = R + gamma* Q(s', argmax_a Q(s',a))
 
             _, loss_summary = sess.run([QNet.updateModel, QNet.loss_summary], feed_dict={QNet.x: state_train, QNet.Q_max: Qtarget, QNet.action: action_train})
 
             # update summary
             summary_writer.add_summary(loss_summary, global_index)
-            #summary_op = tf.summary.merge([train_loss, train_loss_lin, train_loss_ang, train_learning_rate])
             summary_writer.flush()
 
+            # update state, and counters
             state = next_state
             global_index+=1
             step+= 1
 
-            #
+            # check if s is final state
             if done:
                 break
 
-        # epsilon-greedy
-        if eps >= 0.1:
-            eps-= deps
+        # epsilon-greedy schedule
+        eps-= deps
 
-        #
+        # count steps per episode
         step_count.append(step)
 
-        # append buffer
+        # count state visitations
         st = np.zeros((step, FLAGS.state_space))
         for k, (s0, a, r, s1, d) in enumerate(tempbuffer.buffer):
             st[k] = s0
-
         state_count.append(np.sum(st, axis=0))
 
-        if episode % 50 == 0:
+        # print to console
+        if episode % 500 == 0:
             print('Episode %4.d, #Training step %2.d, Epsilon %2.2f' % (episode, np.mean(step_count[-1]), eps))
-            print(np.transpose(state_count[-1].reshape(3,3)))
+            print('State Count: ')
+            print(state_count[-1].reshape(3,3))
 
-        # append buffer
+            # state value
+            Qprint = np.zeros([FLAGS.state_space])
+            for i in range(FLAGS.state_space):
+                ss = np.zeros([FLAGS.state_space]) # loop over one-hot encoding
+                ss[i] = 1
+                Qval = sess.run(QNet.Qout, feed_dict={QNet.x: ss.reshape(1, -1)}) # get Q-value of current state
+                Qprint[i] = np.mean(Qval) # V = E[Q]
+            print('V-Value: ')
+            print(np.round(Qprint.reshape(3, 3), 3))
+
+        # append episode buffer to large buffer
         for s0, a, r, s1, d in tempbuffer.buffer:
             rbuffer.add(s0, a, r, s1, d)
-
-    print(eps)
 
     # update model and prior
 
