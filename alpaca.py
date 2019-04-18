@@ -8,6 +8,9 @@ import sys
 import random
 from collections import Counter
 import os
+import time
+import logging
+
 from replay_buffer import replay_buffer
 from square_environment import square_environment
 
@@ -20,16 +23,12 @@ tf.flags.DEFINE_integer("hidden_space", 16, "Dimensionality of hidden space")
 tf.flags.DEFINE_float("gamma", 0.8, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 0.001, "Initial learning rate")
 tf.flags.DEFINE_float("noise_variance", 0.1, "Noise variance")
-tf.flags.DEFINE_integer("N_episodes", 10000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 500, "Number of episodes")
 tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
-print("\nParameters:")
-for key in FLAGS.__flags.keys():
-    print("{}={}".format(key, getattr(FLAGS, key)))
-print("")
 
 class QNetwork():
     def __init__(self, scope="QNetwork", summaries_dir="./"):
@@ -44,6 +43,7 @@ class QNetwork():
             # build graph
             self._build_model()
 
+        '''
             # summaries writer
             if summaries_dir:
                 summary_dir = os.path.join(summaries_dir, "summaries")#_{}".format(scope))
@@ -51,6 +51,7 @@ class QNetwork():
                     os.makedirs(summary_dir)
             self.summary_writer = tf.summary.FileWriter(summary_dir)
 
+        '''
 
     def model(self, x, name="latent"):
 
@@ -193,9 +194,34 @@ def eGreedyAction(x, epsilon=0.9):
 eps = 0.9
 deps = (eps- 0.1)/ FLAGS.N_episodes
 
+# get TF logger
+log = logging.getLogger('Train')
+log.setLevel(logging.DEBUG)
+
+# create formatter and add it to the handlers
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# create file handler which logs even debug messages
+logger_dir = './logger/'
+if logger_dir:
+    if not os.path.exists(logger_dir):
+        os.makedirs(logger_dir)
+
+fh = logging.FileHandler(logger_dir+'tensorflow_'+ time.strftime('%y-%m-%d_%H-%M')+ '.log')
+fh.setLevel(logging.DEBUG)
+fh.setFormatter(formatter)
+log.addHandler(fh)
+
+# write hyperparameters to logger
+log.info('Parameters')
+for key in FLAGS.__flags.keys():
+    log.info('{}={}'.format(key, getattr(FLAGS, key)))
+print("")
+
 # initialize replay memory and model
 rbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
 tempbuffer = replay_buffer(FLAGS.L_episode) # buffer for episode
+log.info('Build Tensorflow Graph')
 QNet = QNetwork() # neural network
 
 # initialize environment
@@ -208,10 +234,11 @@ with tf.Session() as sess:
 
     # checkpoint and summaries
     saver = tf.train.Saver()
-    summary_writer = tf.summary.FileWriter(logdir=os.path.join('./', 'summaries'), graph=sess.graph)
+    summary_writer = tf.summary.FileWriter(logdir=os.path.join('./', 'summaries/', time.strftime('%y-%m-%d_%H-%M')), graph=sess.graph)
 
     # populate replay memory
     print("Populating replay memory...")
+    log.info('Populating replay memory')
     state = env.reset()
 
     for i in range(FLAGS.replay_memory_size):
@@ -233,6 +260,7 @@ with tf.Session() as sess:
 
     # loop episodes
     print("Episodes...")
+    log.info('Loop over episodes')
     for episode in range(FLAGS.N_episodes):
 
         # reset environment
@@ -302,6 +330,7 @@ with tf.Session() as sess:
 
         # print to console
         if episode % 500 == 0:
+            log.info('Episode {:4d}, #Training steps {:2.0f}, Epsilon {:2.2f}'.format(episode, np.mean(step_count[-20:]), eps))
             print('Episode %4.d, #Training step %2.d, Epsilon %2.2f' % (episode, np.mean(step_count[-1]), eps))
             print('State Count: ')
             print(state_count[-1].reshape(3,3))
