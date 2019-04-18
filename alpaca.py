@@ -23,7 +23,7 @@ tf.flags.DEFINE_integer("hidden_space", 16, "Dimensionality of hidden space")
 tf.flags.DEFINE_float("gamma", 0.8, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 0.001, "Initial learning rate")
 tf.flags.DEFINE_float("noise_variance", 0.1, "Noise variance")
-tf.flags.DEFINE_integer("N_episodes", 500, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
 tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 
@@ -89,6 +89,12 @@ class QNetwork():
         self.x = tf.placeholder(shape=[None, self.state_dim], dtype = tf.float32, name='x')
         self.phi = self.model(self.x) # latent space
 
+        self.x_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='x_next')
+        self.phi_next = self.model(self.x_next)  # latent space
+
+        self.reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
+        self.termination = tf.placeholder(shape=[None], dtype=tf.float32, name='termination')
+
         # output layer (Bayesian)
         # context
         # self.context_x = tf.placeholder(tf.int32, shape=[None, self.state_dim], name="cx")
@@ -115,20 +121,25 @@ class QNetwork():
 
         # predict Q-value
         self.Qout = self.predict(self.phi)
+
         # action placeholder
         self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.actions_onehot = tf.one_hot(self.action, self.action_dim, dtype=tf.float32)
         self.Q = tf.reduce_sum(tf.multiply(self.Qout, self.actions_onehot), axis=1)
 
         #
-        self.Q_max = tf.placeholder(tf.float32, shape=[None], name='qmax') # R+ Q(s', argmax_a Q(s',a))
+        Qmax = self.predict(self.phi_next)
+        max_action = tf.argmax(Qmax, axis=1)
+        self.Qtarget = self.reward+ tf.multiply(tf.gather(Qmax, max_action), self.termination)
+
+        #self.Qtarget = tf.placeholder(tf.float32, shape=[None], name='qmax') # R+ Q(s', argmax_a Q(s',a))
 
         # TODO: perform these operations for a batch
         # loss function
         # diff = self.Q_max- self.Q
         # logdet_Sigma = tf.linalg.logdet(Sigma_pred)
         # self.loss = tf.reduce_mean(tf.matmul(tf.matmul(diff, tf.matrix_inverse(Sigma_pred)), diff)+ logdet_Sigma)
-        self.loss = tf.losses.mean_squared_error(self.Q_max, self.Q)
+        self.loss = tf.losses.mean_squared_error(self.Qtarget, self.Q)
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
@@ -301,7 +312,9 @@ with tf.Session() as sess:
             # last factor to account for case that s is terminating state
             Qtarget = reward_train+ FLAGS.gamma* Qmax* (1- done_train) # Q(s,a) = R + gamma* Q(s', argmax_a Q(s',a))
 
-            _, loss_summary = sess.run([QNet.updateModel, QNet.loss_summary], feed_dict={QNet.x: state_train, QNet.Q_max: Qtarget, QNet.action: action_train})
+            _, loss_summary = sess.run([QNet.updateModel, QNet.loss_summary],
+                                       feed_dict={QNet.x: state_train, QNet.x_next: next_state_train,
+                                                  QNet.action: action_train, QNet.reward: reward_train,  QNet.termination: done_train})
 
             # update summary
             summary_writer.add_summary(loss_summary, global_index)

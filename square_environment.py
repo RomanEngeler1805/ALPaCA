@@ -1,7 +1,7 @@
 import numpy as np
 
 class square_environment():
-    ''' 9x9 square environment with reward in corners '''
+    ''' 3x3 square environment with reward in corners '''
 
     def __init__(self):
         # size of square
@@ -46,24 +46,26 @@ class square_environment():
         # update position
         posx, posy = np.where(self.state == 1)
 
-        if action == 0 and posy != 0:
-            self.state[posx, posy] = 0
-            self.state[posx, posy - 1] = 1
-        if action == 1 and posx != self.size-1:
-            self.state[posx, posy] = 0
-            self.state[posx + 1, posy] = 1
-        if action == 2 and posy != self.size-1:
-            self.state[posx, posy] = 0
-            self.state[posx, posy + 1] = 1
-        if action == 3 and posx != 0:
-            self.state[posx, posy] = 0
-            self.state[posx - 1, posy] = 1
-
         # update reward
         r = self.reward()
 
         # update termination flag
         d = self.termination()
+
+        if not d:
+            if action == 0 and posy != 0:
+                self.state[posx, posy] = 0
+                self.state[posx, posy - 1] = 1
+            if action == 1 and posx != self.size-1:
+                self.state[posx, posy] = 0
+                self.state[posx + 1, posy] = 1
+            if action == 2 and posy != self.size-1:
+                self.state[posx, posy] = 0
+                self.state[posx, posy + 1] = 1
+            if action == 3 and posx != 0:
+                self.state[posx, posy] = 0
+                self.state[posx - 1, posy] = 1
+
 
         # stack observation
         obs = np.array([self.state.flatten(), r, d])
