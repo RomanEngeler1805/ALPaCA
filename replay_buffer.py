@@ -13,9 +13,8 @@ class replay_buffer():
         # random draw N
         return random.sample(self.buffer, batch_size)
 
-    def add(self, state, action, reward, next_state, done):
+    def add(self, new_experience):
         ''' add new experience to replay buffer '''
-        new_experience = (state, action, reward, next_state, done)
         if self.num_experiences < self.buffer_size:
             self.buffer.append(new_experience)
             self.num_experiences += 1

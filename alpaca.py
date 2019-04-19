@@ -16,16 +16,18 @@ from square_environment import square_environment
 
 
 # General Hyperparameters
-tf.flags.DEFINE_integer("batch_size", 4, "Batch size for training")
+tf.flags.DEFINE_integer("batch_size", 10, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 4, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 16, "Dimensionality of hidden space")
 tf.flags.DEFINE_float("gamma", 0.8, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 0.001, "Initial learning rate")
 tf.flags.DEFINE_float("noise_variance", 0.1, "Noise variance")
-tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 500, "Number of episodes")
+tf.flags.DEFINE_integer("N_tasks", 10, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
-tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
+tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
@@ -37,7 +39,7 @@ class QNetwork():
         self.state_dim = FLAGS.state_space
         self.hidden_dim = FLAGS.hidden_space
         self.lr = FLAGS.learning_rate
-        self.nvar = FLAGS.noise_variance
+        self.noise_variance = FLAGS.noise_variance
 
         with tf.variable_scope(scope):
             # build graph
@@ -75,7 +77,6 @@ class QNetwork():
             # TODO: matmul of latent space with weights to get output. What about bias?
             Wout = tf.get_variable('wout', shape=[1, self.hidden_dim, 1], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
             W = tf.tile(Wout, [1, 1, self.action_dim])  # [input, latent space, action space, output space]
-            # TODO: is this correct? check flow in graph
             output = tf.nn.relu(tf.einsum('ijk,mjk->ik', phi, W))
 
             #output = tf.contrib.layers.fully_connected(phi, num_outputs=self.action_dim, activation_fn=None)
@@ -103,17 +104,18 @@ class QNetwork():
         # self.context_phi = self.model(self.context_x) # latent space
 
         # noise variance (yet random)
-        # self.Sigma_e = self.nvar* tf.eye(self.hidden_dim, name='noise_variance')
+        #self.nvar = tf.get_variable("noise_variance", initializer=self.noise_variance)
+        #self.Sigma_e = self.nvar* tf.eye(self.hidden_dim, name='noise_variance')
 
-        # prior
-        # self.K = tf.get_variable('K_init', shape=[self.hidden_dim, 1], dtype=tf.float32)
-        # self.L_asym = tf.get_variable('L_asym', shape=[self.hidden_dim, self.hidden_dim], dtype=tf.float32)  # cholesky decomp of \Lambda_0
-        # self.L = self.L_asym @ tf.transpose(self.L_asym)  # \Lambda_0
+        # prior (updated via GD)
+        #self.w0_bar = tf.get_variable('w_init', shape=[self.hidden_dim, 1], dtype=tf.float32, initializer=tf.contib.layers.xavier_initializer())
+        #self.L_asym = tf.get_variable('L_asym', shape=[self.hidden_dim, self.hidden_dim], dtype=tf.float32, initializer=tf.contib.layers.xavier_initializer())  # cholesky decomp of \Lambda_0
+        #self.L = self.L_asym @ tf.transpose(self.L_asym)  # \Lambda_0
 
         # inner loop: updating posterior distribution ========================================
         # posterior
-        # self.Kt_inv = tf.matrix_inverse(tf.transpose(self.context_x)) @ self.context_x+ self.L
-        # self.Kt = self.Kt_inv @ (tf.transpose(self.context_x) @ self.context_R + self.L @ self.K)
+        #self.wt_bar_inv = tf.matrix_inverse(tf.transpose(self.context_x)) @ self.context_x+ self.L
+        #self.wt_bar = self.wt_bar_inv @ (tf.transpose(self.context_x) @ self.context_R + self.L @ self.w0_bar)
 
 
         # outer loop: updating network and prior distribution ================================
@@ -148,7 +150,6 @@ class QNetwork():
 
         # summary
         loss_summary = tf.summary.scalar('loss', self.loss)
-
 
         # Keep track of gradient values and sparsity (optional)
         grad_summaries = []
@@ -252,6 +253,7 @@ env = square_environment()
 
 # session
 init = tf.global_variables_initializer()
+
 with tf.Session() as sess:
     sess.run(init)
 
@@ -259,6 +261,7 @@ with tf.Session() as sess:
     saver = tf.train.Saver()
     summary_writer = tf.summary.FileWriter(logdir=os.path.join('./', 'summaries/', time.strftime('%y-%m-%d_%H-%M')), graph=sess.graph)
 
+    '''
     # populate replay memory
     print("Populating replay memory...")
     log.info('Populating replay memory')
@@ -275,77 +278,90 @@ with tf.Session() as sess:
             state = env.reset()
         else:
             state = next_state
+    '''
 
     print('Target position: ' + str(env.target) +' (vertical, horizontal)') # not yet changing
     global_index = 0 # counter
     step_count = [] # count steps required to accomplish task
     state_count = [] # count number of visitations of each state
 
+    # ==========================================================
     # loop episodes
     print("Episodes...")
     log.info('Loop over episodes')
     for episode in range(FLAGS.N_episodes):
 
-        # reset environment
-        state = env.reset()
-        tempbuffer.reset()
+        # loop tasks
+        for n in range(FLAGS.N_tasks):
+            # initialize buffer
+            tempbuffer.reset()
 
-        # loop steps
-        step = 0
-        while step < FLAGS.L_episode:
-            # take a step
-            Qval = sess.run(QNet.Qout, feed_dict={QNet.x: state.reshape(1,-1)})
-            action = eGreedyAction(Qval, eps)
-            next_state, reward, done = env.step(action)
+            # reset environment
+            state = env.reset()
 
-            # store memory
-            tempbuffer.add(state, action, reward, next_state, done)
+            # loop steps
+            step = 0
+            while step < FLAGS.L_episode:
+                # take a step
+                Qval = sess.run(QNet.Qout, feed_dict={QNet.x: state.reshape(1,-1)})
+                action = eGreedyAction(Qval, eps)
+                next_state, reward, done = env.step(action)
 
-            # sample from larger buffer [s, a, r, s', d] with current experience not yet included
-            experience = rbuffer.sample(FLAGS.batch_size)
+                # store memory
+                new_experience = [state, action, reward, next_state, done]
+                tempbuffer.add(new_experience)
 
-            state_train = np.zeros((FLAGS.batch_size, FLAGS.state_space))
-            reward_train = np.zeros((FLAGS.batch_size,))
-            action_train = np.zeros((FLAGS.batch_size,))
-            next_state_train = np.zeros((FLAGS.batch_size, FLAGS.state_space))
-            done_train = np.zeros((FLAGS.batch_size,))
 
-            for k, (s0, a, r, s1, d) in enumerate(experience):
-                state_train[k] = s0
-                reward_train[k] = r
-                action_train[k] = a
-                next_state_train[k] = s1
-                done_train[k] = d
+                #if step % FLAGS.update_freq:
+                    #TODO: used only for ALPaCA
+
+                # update state, and counters
+                state = next_state
+                global_index += 1
+                step += 1
+
+                # check if s is final state
+                if done:
+                    break
+
+            # append episode buffer to large buffer
+            rbuffer.add(tempbuffer.buffer)
+
+            # count steps per trajectory
+            step_count.append(step)
+
+
+        # sample trajectories from buffer
+        for k in range(FLAGS.batch_size):
+            trajectory = rbuffer.sample(1)[0] # single trajecotory
+
+            traj_len = len(trajectory) # length of trajectory
+            state_train = np.zeros((traj_len, FLAGS.state_space))
+            reward_train = np.zeros((traj_len,))
+            action_train = np.zeros((traj_len,))
+            next_state_train = np.zeros((traj_len, FLAGS.state_space))
+            done_train = np.zeros((traj_len,))
+
+            for k, experience in enumerate(trajectory):
+                # [state, action, reward, next_state, done]
+                state_train[k] = experience[0]
+                action_train[k] = experience[1]
+                reward_train[k] = experience[2]
+                next_state_train[k] = experience[3]
+                done_train[k] = experience[4]
 
             # update posterior
-            #Qval = sess.run(QNet.Qout, feed_dict={QNet.x: next_state_train}) # feed with s' -> Q(s',a')
-            #Qmax = Qval[range(FLAGS.batch_size), np.argmax(Qval,axis=1)] # Q(s', argmax_a Q(s',a))
-
-            # last factor to account for case that s is terminating state
-            #Qtarget = reward_train+ FLAGS.gamma* Qmax* (1- done_train) # Q(s,a) = R + gamma* Q(s', argmax_a Q(s',a))
-
             _, summaries_merged = sess.run([QNet.updateModel, QNet.summaries_merged],
-                                       feed_dict={QNet.x: state_train, QNet.x_next: next_state_train,
-                                                  QNet.action: action_train, QNet.reward: reward_train,  QNet.termination: done_train})
+                                            feed_dict={QNet.x: state_train, QNet.x_next: next_state_train,
+                                            QNet.action: action_train, QNet.reward: reward_train,  QNet.termination: done_train})
 
             # update summary
             summary_writer.add_summary(summaries_merged, global_index)
             summary_writer.flush()
 
-            # update state, and counters
-            state = next_state
-            global_index+=1
-            step+= 1
-
-            # check if s is final state
-            if done:
-                break
 
         # epsilon-greedy schedule
-        eps-= deps
-
-        # count steps per episode
-        step_count.append(step)
+        eps -= deps
 
         # count state visitations
         st = np.zeros((step, FLAGS.state_space))
@@ -354,7 +370,7 @@ with tf.Session() as sess:
         state_count.append(np.sum(st, axis=0))
 
         # print to console
-        if episode % 500 == 0:
+        if episode % 50 == 0:
             log.info('Episode {:4d}, #Training steps {:2.0f}, Epsilon {:2.2f}'.format(episode, np.mean(step_count[-20:]), eps))
             print('Episode %4.d, #Training step %2.d, Epsilon %2.2f' % (episode, np.mean(step_count[-1]), eps))
             print('State Count: ')
@@ -370,9 +386,6 @@ with tf.Session() as sess:
             print('V-Value: ')
             print(np.round(Qprint.reshape(3, 3), 3))
 
-        # append episode buffer to large buffer
-        for s0, a, r, s1, d in tempbuffer.buffer:
-            rbuffer.add(s0, a, r, s1, d)
 
     # update model and prior
 
