@@ -93,13 +93,14 @@ class QNetwork():
             self.L0 = tf.matmul(self.L0_asym, tf.transpose(self.L0_asym))  # \Lambda_0
 
         # posterior (analytical update)
+        # TODO: stop gradients
         with tf.variable_scope('posterior', reuse=tf.AUTO_REUSE):
-            self.Lt = tf.get_variable('Lt', shape=[self.hidden_dim, self.hidden_dim], trainable=False)
-            self.Lt_inv = tf.get_variable('Lt_inv', shape=[self.hidden_dim, self.hidden_dim], trainable=False)
-            self.wt_bar = tf.get_variable('wt_bar', shape=[self.hidden_dim, 1], trainable=False)
+            self.Lt = tf.get_variable('Lt', shape=[self.hidden_dim, self.hidden_dim])
+            self.Lt_inv = tf.get_variable('Lt_inv', shape=[self.hidden_dim, self.hidden_dim])
+            self.wt_bar = tf.get_variable('wt_bar', shape=[self.hidden_dim, 1])
 
         # weight vector of final layer
-        self.wt = tf.get_variable('wt', shape=[self.hidden_dim], trainable=False)
+        self.wt = tf.get_variable('wt', shape=[self.hidden_dim])
 
         # predict Q-value
         self.Qout = self.predict(self.phi)
@@ -345,12 +346,6 @@ with tf.Session() as sess:
             sess.run(sample_post, feed_dict={phi_hat: phi_hat_train, reward: reward_train})
 
             # update prior via GD
-            # TODO: analyse the input to the sesssion. print shape, some entries and also
-            #  give outputs in the model class to assess the validity
-            #print('ANALYSIS ==========================')
-            #print(phi_hat_valid.shape)
-            #print(reward_valid.shape)
-            #print(phi_hat_valid[0])
             _, summaries_merged, loss = sess.run([QNet.updateModel, QNet.summaries_merged, QNet.loss],
                                            feed_dict={QNet.phi_pred: phi_hat_valid, QNet.reward: reward_valid})
 
