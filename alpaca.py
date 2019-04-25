@@ -24,12 +24,12 @@ tf.flags.DEFINE_float("gamma", 0.8, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 0.001, "Initial learning rate")
 tf.flags.DEFINE_float("noise_variance", 0.001, "Noise variance")
 tf.flags.DEFINE_float("split", 0.5, "Split between fraction of trajectory used for updating posterior vs prior")
-tf.flags.DEFINE_integer("N_episodes", 500, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 5, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 10, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 20, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
-tf.flags.DEFINE_integer("iter_amax", 5, "Number of iterations performed to determine amax")
+tf.flags.DEFINE_integer("iter_amax", 3, "Number of iterations performed to determine amax")
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
@@ -58,10 +58,10 @@ class QNetwork():
 
         return hidden2
 
-    def predict(self, phi, name="prediction"):
+    def predict(self, phi):
         ''' predict Q-values of  next time step '''
-        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
-            Wt = tf.get_variable('wt', shape=[1, self.hidden_dim, 1], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+        with tf.variable_scope("prediction", reuse=tf.AUTO_REUSE):
+            Wt = tf.get_variable('wt', shape=[1, self.hidden_dim, 1], dtype=tf.float32)
             W = tf.tile(Wt, [1, 1, self.action_dim])  # [input, latent space, action space, output space]
             output = tf.einsum('ijk,mjk->ik', phi, W)
 
@@ -88,7 +88,8 @@ class QNetwork():
         (bs, _, _) = tf.unstack(tf.to_int32(tf.shape(self.phi)))
         self.Sigma_e = self.nvar * tf.ones(bs, name='noise_variance')
 
-        self.wt = tf.get_variable('wt', shape=[self.hidden_dim])
+        with tf.variable_scope('prediction', reuse=tf.AUTO_REUSE):
+            self.wt = tf.get_variable('wt', shape=[self.hidden_dim])
 
         # prior (updated via GD) ---------------------------------------------------------
         with tf.variable_scope('prior', reuse=tf.AUTO_REUSE):
@@ -118,8 +119,9 @@ class QNetwork():
 
             self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1,1]), self.Lt_inv)
 
-        # predict Q-value
-        self.Qout = self.predict(self.phi)
+        with tf.variable_scope("prediction", reuse=tf.AUTO_REUSE):
+            # predict Q-value
+            self.Qout = self.predict(self.phi)
 
         # loss and summaries ==============================================================
         with tf.variable_scope('loss', reuse=tf.AUTO_REUSE):
@@ -246,7 +248,7 @@ def eGreedyAction(x, epsilon=0.9):
 # Main Routine ===========================================================================
 
 # epsilon-greedy
-eps = 0.
+eps = 0.5
 #deps = (eps- 0.1)/ FLAGS.N_episodes
 
 # get TF logger --------------------------------------------------------------------------
@@ -343,11 +345,11 @@ with tf.Session() as sess:
                         reward_train[k] = experience[2]
                         next_state_train[k] = experience[3]
                         done_train[k] = experience[4]
-
+                    
                     sess.run(QNet.sample_post, feed_dict={QNet.state: state_train, QNet.action: action_train,
                                                           QNet.reward: reward_train, QNet.state_next: next_state_train,
                                                           QNet.done: done_train})
-                
+
                 # update state, and counters
                 state = next_state
                 global_index += 1
@@ -366,8 +368,10 @@ with tf.Session() as sess:
         # ---------------------------------------------------------------------------
         # sample trajectories from buffer
         # TODO: check if different trajectories are sampled
-        updatebuffer = fullbuffer.sample(5)
-        for trajectory in updatebuffer:
+        #updatebuffer = fullbuffer.sample(5)
+        #for trajectory in updatebuffer:
+        for _ in range(5):
+            trajectory = fullbuffer.sample(1)[0]
             traj_len = len(trajectory) # length of trajectory
 
             state_sample = np.zeros([traj_len, FLAGS.state_space])
@@ -430,6 +434,7 @@ with tf.Session() as sess:
         if episode % 50 == 0:
             log.info('Episode {:4d}, #Training steps {:2.0f}, Epsilon {:2.2f}'.format(episode, np.mean(step_count[-20:]), eps))
             print('Episode %4.d, #Training step %2.d, Epsilon %2.2f' % (episode, np.mean(step_count[-1]), eps))
+            #log.info(('Episode {:4d}, wtbar '+str(np.round(wt,2))).format(episode))
             #print('State Count: ')
             #print(state_count[-1].reshape(3,3))
 
