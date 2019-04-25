@@ -25,22 +25,24 @@ tf.flags.DEFINE_float("learning_rate", 0.001, "Initial learning rate")
 tf.flags.DEFINE_float("noise_variance", 0.001, "Noise variance")
 tf.flags.DEFINE_float("split", 0.5, "Split between fraction of trajectory used for updating posterior vs prior")
 tf.flags.DEFINE_integer("N_episodes", 500, "Number of episodes")
-tf.flags.DEFINE_integer("N_tasks", 10, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
+tf.flags.DEFINE_integer("N_tasks", 5, "Number of tasks")
+tf.flags.DEFINE_integer("L_episode", 10, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_integer("iter_amax", 5, "Number of iterations performed to determine amax")
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
 
 class QNetwork():
-    def __init__(self, scope="QNetwork", summaries_dir="./"):
+    def __init__(self, scope="QNetwork"):
         self.gamma = FLAGS.gamma
         self.action_dim = FLAGS.action_space
         self.state_dim = FLAGS.state_space
         self.hidden_dim = FLAGS.hidden_space
         self.lr = FLAGS.learning_rate
         self.noise_variance = FLAGS.noise_variance
+        self.iter_amax = FLAGS.iter_amax
 
         with tf.variable_scope(scope):
             # build graph
@@ -58,12 +60,10 @@ class QNetwork():
 
     def predict(self, phi, name="prediction"):
         ''' predict Q-values of  next time step '''
-
         with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
-            # TODO: matmul of latent space with weights to get output. What about bias?
             Wt = tf.get_variable('wt', shape=[1, self.hidden_dim, 1], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
             W = tf.tile(Wt, [1, 1, self.action_dim])  # [input, latent space, action space, output space]
-            output = tf.nn.relu(tf.einsum('ijk,mjk->ik', phi, W))
+            output = tf.einsum('ijk,mjk->ik', phi, W)
 
         return output
 
@@ -71,50 +71,76 @@ class QNetwork():
     def _build_model(self):
         ''' constructing tensorflow model '''
         # placeholders ====================================================================
-        self.x = tf.placeholder(shape=[None, self.state_dim], dtype = tf.float32, name='x') # input
-        self.phi = self.model(self.x) # latent space
+        self.state = tf.placeholder(shape=[None, self.state_dim], dtype = tf.float32, name='state') # input
+        self.state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
 
-        # to update prior and model parameters
-        with tf.variable_scope('loss', reuse=tf.AUTO_REUSE):
-            self.phi_pred = tf.placeholder(tf.float32, shape=[None, self.hidden_dim], name="phi_pred")
-            self.reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
+        self.phi = self.model(self.state) # latent space
+        self.phi_next = self.model(self.state_next)  # latent space
+
+        self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
+        self.done = tf.placeholder(shape=[None,1], dtype=tf.float32, name='done')
+
+        self.reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
 
         # output layer (Bayesian) =========================================================
         # noise variance (scalar -> batchsize)
         self.nvar = self.noise_variance #tf.get_variable("noise_variance", initializer=self.noise_variance)
-        (bs, _) = tf.unstack(tf.to_int32(tf.shape(self.phi_pred)))
-        self.Sigma_e = self.nvar * tf.eye(bs, name='noise_variance')
+        (bs, _, _) = tf.unstack(tf.to_int32(tf.shape(self.phi)))
+        self.Sigma_e = self.nvar * tf.ones(bs, name='noise_variance')
 
-        # prior (updated via GD)
-        # TODO: initialization
+        self.wt = tf.get_variable('wt', shape=[self.hidden_dim])
+
+        # prior (updated via GD) ---------------------------------------------------------
         with tf.variable_scope('prior', reuse=tf.AUTO_REUSE):
-            self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, initializer=tf.constant(0.0,shape=[self.hidden_dim, 1]))
+            self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.hidden_dim,1])
             self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.eye(self.hidden_dim))  # cholesky decomp of \Lambda_0
             self.L0 = tf.matmul(self.L0_asym, tf.transpose(self.L0_asym))  # \Lambda_0
 
-        # posterior (analytical update)
-        # TODO: stop gradients
-        with tf.variable_scope('posterior', reuse=tf.AUTO_REUSE):
-            self.Lt = tf.get_variable('Lt', shape=[self.hidden_dim, self.hidden_dim])
-            self.Lt_inv = tf.get_variable('Lt_inv', shape=[self.hidden_dim, self.hidden_dim])
-            self.wt_bar = tf.get_variable('wt_bar', shape=[self.hidden_dim, 1])
+            self.sample_prior = self._sample_prior()
 
-        # weight vector of final layer
-        self.wt = tf.get_variable('wt', shape=[self.hidden_dim])
+        # posterior (analytical update) --------------------------------------------------
+        with tf.variable_scope('posterior', reuse=tf.AUTO_REUSE):
+            # phi(s, a)
+            taken_action = tf.one_hot(tf.reshape(self.action, [-1,1]), self.action_dim, dtype=tf.float32)
+            phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
+
+            # update posterior
+            self.wt_bar, self.Lt_inv = self._max_posterior(self.phi_next, phi_taken, self.done, self.reward)
+
+            # phi(s', a*)
+            Q_next = self.predict(self.phi_next)
+            max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
+            phi_max = tf.reduce_sum(tf.multiply(self.phi_next, max_action), axis=2)  #[batch_size, hidden_dim]
+            phi_max = tf.stop_gradient(phi_max)
+
+            # sample posterior distribution
+            self.phi_hat = phi_taken- self.gamma* tf.multiply(phi_max, 1- self.done)
+
+            self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1,1]), self.Lt_inv)
 
         # predict Q-value
         self.Qout = self.predict(self.phi)
 
         # loss and summaries ==============================================================
         with tf.variable_scope('loss', reuse=tf.AUTO_REUSE):
-            # prior update
-            self.Qdiff = tf.matmul(self.phi_pred, self.wt_bar)- self.reward
+            # The next three lines are included since for the GD update step, we require the posterior calculated by the
+            # context information, which is different than the information used for calculating the gradient.
+            # to avoid two more placeholders for the context data (and the resulting use of more phi's and Q's)
+            # I currently solve it by interrupting the computational graph here
+            self.max_post = self._max_posterior(self.phi_next, phi_taken, self.done, self.reward) # based on training data
+            self.wt_bar_max = tf.placeholder(shape=[self.hidden_dim], dtype=tf.float32, name='wt_bar_max') # TODO
+            self.Lt_inv_max = tf.placeholder(shape=[self.hidden_dim, self.hidden_dim], dtype=tf.float32, name='Lt_inv_max') # TODO
 
-            # TODO: can these operations be performed directly on a batch?
+            self.Qdiff = self.reward+ tf.einsum('i,ji->j', self.wt_bar_max, -self.phi_hat) # [batch_size] / minus needs to be there
+
+            # TODO: check this. can sigma be calculated with a single einsum? (would likely require use of delta-fcn)
+            # stacked covariance (column vector)
+            Sigma_pred = tf.einsum('ij,jk->ik', self.phi_hat, self.Lt_inv_max) # [batch_size,1]
+            Sigma_pred = tf.reduce_sum(tf.multiply(Sigma_pred, self.phi_hat), axis=1) + self.Sigma_e
+            logdet_Sigma = tf.reduce_sum(Sigma_pred) # logdet(sigma) with sigma: [batch_size,1]
+
             # loss function
-            Sigma_pred = tf.matmul(self.phi_pred, tf.matmul(self.Lt_inv, tf.transpose(self.phi_pred))) + self.Sigma_e
-            #logdet_Sigma = tf.linalg.logdet(Sigma_pred)
-            self.loss = tf.matmul(tf.transpose(self.Qdiff), tf.matmul(Sigma_pred, self.Qdiff))#+ logdet_Sigma
+            self.loss = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff)+ logdet_Sigma
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
@@ -131,31 +157,60 @@ class QNetwork():
                 grad_hist_summary = tf.summary.histogram("/grad/hist/%s" % v.name, g)
                 grad_summaries.append(grad_hist_summary)
 
-        self.summaries_merged = tf.summary.merge([grad_summaries])
+        self.summaries_merged = tf.summary.merge([grad_summaries, self.loss_summary])
 
 
-    def sample_prior(self):
-        ''' update prior parameters (w_bar_0, Sigma_0, Theta) via GD '''
-        with tf.variable_scope('sample_prior', reuse=tf.AUTO_REUSE):
-            update_op = tf.assign(self.wt, tf.py_func(func=sampleMN, inp=(self.w0_bar, tf.matrix_inverse(self.L0)), Tout=tf.float32))
+    def _sample_prior(self):
+        ''' sample wt from prior '''
+        # with tf.variable_scope('sample_prior', reuse=tf.AUTO_REUSE):
+        update_op = tf.assign(self.wt, self._sample_MN(self.w0_bar, tf.matrix_inverse(self.L0)))
         return update_op
 
-    def sample_posterior(self, phi_hat, reward):
-        ''' update posterior parameters (w_bar_t, Sigma_t) via closed-form expressions '''
-        with tf.variable_scope('sample_posterior', reuse=tf.AUTO_REUSE):
-            _ = tf.assign(self.Lt, tf.matmul(tf.transpose(phi_hat), phi_hat) + self.L0)
-            _ = tf.assign(self.Lt_inv, tf.matrix_inverse(self.Lt))
-            wt_unnormalized = tf.matmul(self.L0, self.w0_bar)+tf.matmul(tf.transpose(phi_hat), tf.reshape(reward, [-1,1]))
-            _ = tf.assign(self.wt_bar, tf.matmul(self.Lt_inv, wt_unnormalized))
-
-            update_op = tf.assign(self.wt, tf.py_func(func=sampleMN, inp=(self.wt_bar, self.Lt_inv), Tout=tf.float32))
+    def _sample_posterior(self, wt_bar, Lt_inv):
+        ''' sample wt from posterior '''
+        #with tf.variable_scope('sample_posterior', reuse=tf.AUTO_REUSE):
+        update_op = tf.assign(self.wt, self._sample_MN(wt_bar, Lt_inv))
         return update_op
 
+    def _sample_MN(self, mu, cov):
+        ''' sample from multi-variate normal '''
+        A = tf.linalg.cholesky(cov)
+        z = tf.random_normal(shape=[self.hidden_dim,1])
+        return tf.reshape(mu+ tf.matmul(A,z), [-1])
 
-def sampleMN(K, cov):
-    mean = np.reshape(np.transpose(K), [-1])
-    K_vec = np.random.multivariate_normal(mean,cov)
-    return np.float32(K_vec)
+    def _update_posterior(self, phi_hat, reward):
+        ''' update posterior distribution '''
+        Lt = tf.matmul(tf.transpose(phi_hat), phi_hat) + self.L0
+        Lt_inv = tf.matrix_inverse(Lt)
+        wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
+                          tf.matmul(tf.transpose(phi_hat), tf.reshape(reward, [-1, 1]))
+        wt_bar = tf.matmul(Lt_inv, wt_unnormalized)
+
+        return wt_bar, Lt_inv
+
+    def _max_posterior(self, phi_next, phi_taken, done, reward):
+        ''' determine wt_bar for calculating phi(s_{t+1}, a*) '''
+        # determine phi(max_action) based on Q determined by sampling wt from prior
+        _ = self._sample_prior() # sample wt
+        Q_next = self.predict((phi_next))
+        max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
+        phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
+
+        # iterations
+        for _ in range(self.iter_amax):
+            # sample posterior
+            phi_hat = phi_taken - self.gamma* tf.multiply(phi_max, 1 - done)
+
+            # update posterior distributior
+            wt_bar, Lt_inv = self._update_posterior(phi_hat, reward)
+
+            # determine phi(max_action) based on Q determined by sampling wt from posterior
+            _ = self._sample_posterior(wt_bar, Lt_inv)
+            Q_next = self.predict((phi_next))
+            max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
+            phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
+
+        return tf.reshape(wt_bar, [-1]), Lt_inv
 
 def copy_model_parameters(sess, estimator1, estimator2):
     """
@@ -180,7 +235,6 @@ def copy_model_parameters(sess, estimator1, estimator2):
 
 def eGreedyAction(x, epsilon=0.9):
     ''' select next action according to epsilon-greedy algorithm '''
-
     if np.random.rand() > epsilon:
         action = np.argmax(x)
     else:
@@ -189,13 +243,13 @@ def eGreedyAction(x, epsilon=0.9):
     return action
 
 
-# Main Routine =`==========================================================================
+# Main Routine ===========================================================================
 
 # epsilon-greedy
 eps = 0.
 #deps = (eps- 0.1)/ FLAGS.N_episodes
 
-# get TF logger
+# get TF logger --------------------------------------------------------------------------
 log = logging.getLogger('Train')
 log.setLevel(logging.DEBUG)
 
@@ -219,8 +273,8 @@ for key in FLAGS.__flags.keys():
     log.info('{}={}'.format(key, getattr(FLAGS, key)))
 print("")
 
-# initialize replay memory
-rbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
+# initialize replay memory ----------------------------------------------------------------
+fullbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
 tempbuffer = replay_buffer(FLAGS.L_episode) # buffer for episode
 
 # initialize model
@@ -235,12 +289,6 @@ with tf.Session() as sess:
     init = tf.global_variables_initializer()
     sess.run(init)
 
-    # functions to update prior and posterior
-    sample_prior = QNet.sample_prior()
-    phi_hat = tf.placeholder(tf.float32, shape=[None, FLAGS.hidden_space], name="phi_hat")
-    reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
-    sample_post = QNet.sample_posterior(phi_hat, reward)
-
     # checkpoint and summaries
     saver = tf.train.Saver()
     summary_writer = tf.summary.FileWriter(logdir=os.path.join('./', 'summaries/', time.strftime('%y-%m-%d_%H-%M')), graph=sess.graph)
@@ -250,56 +298,55 @@ with tf.Session() as sess:
     # initialize
     global_index = 0 # counter
     step_count = [] # count steps required to accomplish task
-    post_samples = []
 
-    # ==========================================================
+    # -----------------------------------------------------------------------------------
     # loop episodes
     print("Episodes...")
     log.info('Loop over episodes')
     for episode in range(FLAGS.N_episodes):
 
-        # loop tasks
+        # loop tasks --------------------------------------------------------------------
         for n in range(FLAGS.N_tasks):
             # initialize buffer
             tempbuffer.reset()
             # reset environment
             state = env.reset()
             # sample w from prior
-            sess.run(sample_prior)
+            sess.run([QNet.sample_prior])
 
             # loop steps
             step = 0
             while step < FLAGS.L_episode:
-                # take a step
-                Qval, phi = sess.run([QNet.Qout, QNet.phi], feed_dict={QNet.x: state.reshape(1,-1)})
-                Qval = Qval.reshape(FLAGS.action_space)
-                phi = phi.reshape(FLAGS.hidden_space, FLAGS.action_space)
+                # take a step in the environment
+                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(1,-1)})
 
                 action = eGreedyAction(Qval, eps)
-                next_state, rew, done = env.step(action)
+                next_state, reward, done = env.step(action)
 
-                Qval_next, phi_next = sess.run([QNet.Qout, QNet.phi], feed_dict={QNet.x: next_state.reshape(1,-1)})
-                Qval_next = Qval_next.reshape(FLAGS.action_space)
-                phi_next = phi_next.reshape(FLAGS.hidden_space, FLAGS.action_space)
-
-                # phi_hat
-                phi_h = phi[:,action]- FLAGS.gamma* phi_next[:,np.argmax(Qval_next)]* (1- done)
-
-                # store memory
-                new_experience = [phi_h, rew, done]
+                # store experience in memory
+                new_experience = [state, action, reward, next_state, done]
                 tempbuffer.add(new_experience)
 
                 # update posterior
-
+                # TODO: could speed up by iteratively adding
                 if step % FLAGS.update_freq:
-                    phi_hat_train = np.zeros([step, FLAGS.hidden_space])
                     reward_train = np.zeros([step,])
+                    state_train = np.zeros([step, FLAGS.state_space])
+                    next_state_train = np.zeros([step, FLAGS.state_space])
+                    action_train = np.zeros([step, FLAGS.action_space])
+                    done_train = np.zeros([step, 1])
 
                     for k, experience in enumerate(tempbuffer.buffer):
-                        phi_hat_train[k] = experience[0]
-                        reward_train[k] = experience[1]
+                        # [s, a, r, s', a*, d]
+                        state_train[k] = experience[0]
+                        action_train[k] = experience[1]
+                        reward_train[k] = experience[2]
+                        next_state_train[k] = experience[3]
+                        done_train[k] = experience[4]
 
-                    sess.run(sample_post, feed_dict={phi_hat: phi_hat_train, reward: reward_train})
+                    sess.run(QNet.sample_post, feed_dict={QNet.state: state_train, QNet.action: action_train,
+                                                          QNet.reward: reward_train, QNet.state_next: next_state_train,
+                                                          QNet.done: done_train})
                 
                 # update state, and counters
                 state = next_state
@@ -307,48 +354,63 @@ with tf.Session() as sess:
                 step += 1
 
                 # check if s is final state
-                if done:
-                    break
+                # if done:
+                #    break
 
             # append episode buffer to large buffer
-            rbuffer.add(tempbuffer.buffer)
+            fullbuffer.add(tempbuffer.buffer)
 
             # count steps per trajectory
             step_count.append(step)
 
-        # =========================================================
+        # ---------------------------------------------------------------------------
         # sample trajectories from buffer
-        # TODO: like this it's possible that the same trajectories are resampled. sample batchsize
-        #  and then loop over resulting container
-        for _ in range(FLAGS.batch_size):
-            trajectory = rbuffer.sample(1)[0] # single trajectory
-
+        # TODO: check if different trajectories are sampled
+        updatebuffer = fullbuffer.sample(5)
+        for trajectory in updatebuffer:
             traj_len = len(trajectory) # length of trajectory
-            phi_hat_sample = np.zeros((traj_len, FLAGS.hidden_space)) # phi_hat
-            reward_sample = np.zeros((traj_len))
+
+            state_sample = np.zeros([traj_len, FLAGS.state_space])
+            action_sample = np.zeros([traj_len,])
+            reward_sample = np.zeros([traj_len, ])
+            next_state_sample = np.zeros([traj_len, FLAGS.state_space])
+            done_sample = np.zeros([traj_len,1])
 
             for k, experience in enumerate(trajectory):
-                # [phi, reward, done]
-                phi_hat_sample[k] = experience[0]
-                reward_sample[k] = experience[1]
+                # [s, a, r, s', a*, d]
+                state_sample[k] = experience[0]
+                action_sample[k] = experience[1]
+                reward_sample[k] = experience[2]
+                next_state_sample[k] = experience[3]
+                done_sample[k] = experience[4]
 
             # split in train and validation set
             train = np.random.choice(np.arange(traj_len), np.int(FLAGS.split* traj_len),replace=False) # mixed
             valid = np.setdiff1d(np.arange(traj_len), train)
 
-            phi_hat_train = phi_hat_sample[train, :]
+            state_train = state_sample[train, :]
+            action_train = action_sample[train]
             reward_train = reward_sample[train]
+            next_state_train = next_state_sample[train, :]
+            done_train = done_sample[train]
 
-            phi_hat_valid = phi_hat_sample[valid, :]
+            state_valid = state_sample[valid, :]
+            action_valid = action_sample[valid]
             reward_valid = reward_sample[valid]
+            next_state_valid = next_state_sample[valid, :]
+            done_valid = done_sample[valid]
 
             # update posterior
-            sess.run(sample_post, feed_dict={phi_hat: phi_hat_train, reward: reward_train})
+            wt, Lt_inv = sess.run(QNet.max_post, feed_dict={QNet.state: state_train, QNet.action: action_train,
+                                                            QNet.reward: reward_train, QNet.state_next: next_state_train,
+                                                            QNet.done: done_train})
 
             # update prior via GD
-            _, summaries_merged, loss = sess.run([QNet.updateModel, QNet.summaries_merged, QNet.loss],
-                                           feed_dict={QNet.phi_pred: phi_hat_valid, QNet.reward: reward_valid})
-
+            _, summaries_merged= sess.run([QNet.updateModel, QNet.summaries_merged],
+                                           feed_dict={QNet.state: state_valid, QNet.action: action_valid,
+                                                      QNet.reward: reward_valid, QNet.state_next: next_state_valid,
+                                                      QNet.done: done_valid,
+                                                      QNet.wt_bar_max: wt, QNet.Lt_inv_max: Lt_inv})
 
             # update summary
             summary_writer.add_summary(summaries_merged, global_index)
@@ -357,6 +419,7 @@ with tf.Session() as sess:
         # epsilon-greedy schedule
         #eps -= deps
 
+        # output to console -------------------------------------------------------
         # count state visitations
         #st = np.zeros((step, FLAGS.state_space))
         #for k, experience in enumerate(tempbuffer.buffer):
@@ -375,7 +438,7 @@ with tf.Session() as sess:
             for i in range(FLAGS.state_space):
                 ss = np.zeros([FLAGS.state_space]) # loop over one-hot encoding
                 ss[i] = 1
-                Qval = sess.run(QNet.Qout, feed_dict={QNet.x: ss.reshape(1, -1)}) # get Q-value of current state
+                Qval = sess.run(QNet.Qout, feed_dict={QNet.state: ss.reshape(1, -1)}) # get Q-value of current state
                 Qprint[i] = np.mean(Qval) # V = E[Q]
             print('V-Value: ')
             print(np.round(Qprint.reshape(3, 3), 3))
