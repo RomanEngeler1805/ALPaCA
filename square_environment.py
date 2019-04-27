@@ -29,7 +29,7 @@ class square_environment():
         ''' reward function '''
         target_x, target_y = self.target
         if self.state[target_x,target_y] == 1:
-            self.d = 1
+            #self.d = 1
             return 1
 
         return 0

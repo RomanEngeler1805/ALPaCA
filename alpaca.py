@@ -22,8 +22,8 @@ tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 16, "Dimensionality of hidden space")
 tf.flags.DEFINE_float("gamma", 0.8, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 0.001, "Initial learning rate")
-tf.flags.DEFINE_float("noise_variance", 0.001, "Noise variance")
-tf.flags.DEFINE_float("split", 0.5, "Split between fraction of trajectory used for updating posterior vs prior")
+tf.flags.DEFINE_float("noise_variance", 0.01, "Noise variance")
+tf.flags.DEFINE_float("split", 0.0, "Split between fraction of trajectory used for updating posterior vs prior")
 tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 5, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 20, "Length of episodes")
@@ -71,6 +71,18 @@ class QNetwork():
     def _build_model(self):
         ''' constructing tensorflow model '''
         # placeholders ====================================================================
+        # context data
+        self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
+        self.context_state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
+
+        self.context_phi = self.model(self.context_state)  # latent space
+        self.context_phi_next = self.model(self.context_state_next)  # latent space
+
+        self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
+        self.context_done = tf.placeholder(shape=[None, 1], dtype=tf.float32, name='done')
+        self.context_reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
+
+        # for prediction
         self.state = tf.placeholder(shape=[None, self.state_dim], dtype = tf.float32, name='state') # input
         self.state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
 
@@ -79,8 +91,11 @@ class QNetwork():
 
         self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.done = tf.placeholder(shape=[None,1], dtype=tf.float32, name='done')
-
         self.reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
+
+        with tf.variable_scope("prediction", reuse=tf.AUTO_REUSE):
+            # predict Q-value
+            self.Qout = self.predict(self.phi)
 
         # output layer (Bayesian) =========================================================
         # noise variance (scalar -> batchsize)
@@ -89,7 +104,7 @@ class QNetwork():
         self.Sigma_e = self.nvar * tf.ones(bs, name='noise_variance')
 
         with tf.variable_scope('prediction', reuse=tf.AUTO_REUSE):
-            self.wt = tf.get_variable('wt', shape=[self.hidden_dim])
+            self.wt = tf.get_variable('wt', shape=[self.hidden_dim,1])
 
         # prior (updated via GD) ---------------------------------------------------------
         with tf.variable_scope('prior', reuse=tf.AUTO_REUSE):
@@ -102,11 +117,21 @@ class QNetwork():
         # posterior (analytical update) --------------------------------------------------
         with tf.variable_scope('posterior', reuse=tf.AUTO_REUSE):
             # phi(s, a)
-            taken_action = tf.one_hot(tf.reshape(self.action, [-1,1]), self.action_dim, dtype=tf.float32)
+            context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
+            context_phi_taken = tf.reduce_sum(tf.multiply(self.context_phi, context_taken_action), axis=2)
+
+            taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
             phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
 
-            # update posterior
-            self.wt_bar, self.Lt_inv = self._max_posterior(self.phi_next, phi_taken, self.done, self.reward)
+            # update posterior if there is data
+            (bs, _, _) = tf.unstack(tf.to_int32(tf.shape(self.context_phi)))
+            self.wt_bar, self.Lt_inv = tf.cond(bs > 0,
+                                               lambda: self._max_posterior(self.context_phi_next, context_phi_taken,
+                                                                           self.context_done, self.context_reward),
+                                               lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+
+            # sample posterior
+            self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
             # phi(s', a*)
             Q_next = self.predict(self.phi_next)
@@ -114,31 +139,20 @@ class QNetwork():
             phi_max = tf.reduce_sum(tf.multiply(self.phi_next, max_action), axis=2)  #[batch_size, hidden_dim]
             phi_max = tf.stop_gradient(phi_max)
 
-            # sample posterior distribution
-            self.phi_hat = phi_taken- self.gamma* tf.multiply(phi_max, 1- self.done)
-
-            self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1,1]), self.Lt_inv)
-
-        with tf.variable_scope("prediction", reuse=tf.AUTO_REUSE):
-            # predict Q-value
-            self.Qout = self.predict(self.phi)
+            # phi_hat for prediction
+            self.phi_hat = phi_taken - self.gamma * tf.multiply(phi_max, 1 - self.done)
 
         # loss and summaries ==============================================================
         with tf.variable_scope('loss', reuse=tf.AUTO_REUSE):
-            # The next three lines are included since for the GD update step, we require the posterior calculated by the
-            # context information, which is different than the information used for calculating the gradient.
-            # to avoid two more placeholders for the context data (and the resulting use of more phi's and Q's)
-            # I currently solve it by interrupting the computational graph here
-            self.max_post = self._max_posterior(self.phi_next, phi_taken, self.done, self.reward) # based on training data
-            self.wt_bar_max = tf.placeholder(shape=[self.hidden_dim], dtype=tf.float32, name='wt_bar_max') # TODO need backprop through this variable!!!
-            self.Lt_inv_max = tf.placeholder(shape=[self.hidden_dim, self.hidden_dim], dtype=tf.float32, name='Lt_inv_max') # TODO
 
-            self.Qdiff = self.reward+ tf.einsum('i,ji->j', self.wt_bar_max, -self.phi_hat) # [batch_size] / minus needs to be there
+            #to avoid unrolling of max_a calculation (maybe improves stability)
+            #self.phi_hat = tf.stop_gradient(self.phi_hat)
+            self.Qdiff = self.reward+ tf.einsum('i,ji->j', tf.reshape(self.wt_bar, [-1]), -self.phi_hat) # [batch_size] / minus needs to be there
 
             # TODO: d=0 in environemnt
             # TODO: check this. can sigma be calculated with a single einsum? (would likely require use of delta-fcn)
             # stacked covariance (column vector)
-            Sigma_pred = tf.einsum('ij,jk->ik', self.phi_hat, self.Lt_inv_max) # [batch_size,1]
+            Sigma_pred = tf.einsum('ij,jk->ik', self.phi_hat, self.Lt_inv) # [batch_size,1]
             Sigma_pred = tf.reduce_sum(tf.multiply(Sigma_pred, self.phi_hat), axis=1) + self.Sigma_e
             logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred)) # logdet(sigma) with sigma: [batch_size,1]
 
@@ -179,7 +193,7 @@ class QNetwork():
         ''' sample from multi-variate normal '''
         A = tf.linalg.cholesky(cov)
         z = tf.random_normal(shape=[self.hidden_dim,1])
-        return tf.reshape(mu+ tf.matmul(A,z), [-1])
+        return (mu+ tf.matmul(A,z))
 
     def _update_posterior(self, phi_hat, reward):
         ''' update posterior distribution '''
@@ -349,9 +363,10 @@ with tf.Session() as sess:
                         next_state_train[k] = experience[3]
                         done_train[k] = experience[4]
                     
-                    sess.run(QNet.sample_post, feed_dict={QNet.state: state_train, QNet.action: action_train,
-                                                          QNet.reward: reward_train, QNet.state_next: next_state_train,
-                                                          QNet.done: done_train})
+                    sess.run(QNet.sample_post,
+                             feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
+                                        QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
+                                        QNet.context_done: done_train})
 
                 # update state, and counters
                 state = next_state
@@ -407,17 +422,14 @@ with tf.Session() as sess:
             next_state_valid = next_state_sample[valid, :]
             done_valid = done_sample[valid]
 
-            # update posterior
-            wt, Lt_inv = sess.run(QNet.max_post, feed_dict={QNet.state: state_train, QNet.action: action_train,
-                                                            QNet.reward: reward_train, QNet.state_next: next_state_train,
-                                                            QNet.done: done_train})
-
             # update prior via GD
             _, summaries_merged= sess.run([QNet.updateModel, QNet.summaries_merged],
-                                           feed_dict={QNet.state: state_valid, QNet.action: action_valid,
-                                                      QNet.reward: reward_valid, QNet.state_next: next_state_valid,
-                                                      QNet.done: done_valid,
-                                                      QNet.wt_bar_max: wt, QNet.Lt_inv_max: Lt_inv})
+                                          feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
+                                                     QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
+                                                     QNet.context_done: done_train,
+                                                     QNet.state: state_valid, QNet.action: action_valid,
+                                                     QNet.reward: reward_valid, QNet.state_next: next_state_valid,
+                                                     QNet.done: done_valid})
 
             # update summary
             summary_writer.add_summary(summaries_merged, global_index)
