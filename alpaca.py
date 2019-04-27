@@ -130,16 +130,17 @@ class QNetwork():
             # to avoid two more placeholders for the context data (and the resulting use of more phi's and Q's)
             # I currently solve it by interrupting the computational graph here
             self.max_post = self._max_posterior(self.phi_next, phi_taken, self.done, self.reward) # based on training data
-            self.wt_bar_max = tf.placeholder(shape=[self.hidden_dim], dtype=tf.float32, name='wt_bar_max') # TODO
+            self.wt_bar_max = tf.placeholder(shape=[self.hidden_dim], dtype=tf.float32, name='wt_bar_max') # TODO need backprop through this variable!!!
             self.Lt_inv_max = tf.placeholder(shape=[self.hidden_dim, self.hidden_dim], dtype=tf.float32, name='Lt_inv_max') # TODO
 
             self.Qdiff = self.reward+ tf.einsum('i,ji->j', self.wt_bar_max, -self.phi_hat) # [batch_size] / minus needs to be there
 
+            # TODO: d=0 in environemnt
             # TODO: check this. can sigma be calculated with a single einsum? (would likely require use of delta-fcn)
             # stacked covariance (column vector)
             Sigma_pred = tf.einsum('ij,jk->ik', self.phi_hat, self.Lt_inv_max) # [batch_size,1]
             Sigma_pred = tf.reduce_sum(tf.multiply(Sigma_pred, self.phi_hat), axis=1) + self.Sigma_e
-            logdet_Sigma = tf.reduce_sum(Sigma_pred) # logdet(sigma) with sigma: [batch_size,1]
+            logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred)) # logdet(sigma) with sigma: [batch_size,1]
 
             # loss function
             self.loss = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff)+ logdet_Sigma
@@ -193,8 +194,10 @@ class QNetwork():
     def _max_posterior(self, phi_next, phi_taken, done, reward):
         ''' determine wt_bar for calculating phi(s_{t+1}, a*) '''
         # determine phi(max_action) based on Q determined by sampling wt from prior
+        # TODO: take w0 for first action
+        # TODO: tf.cond. if length > 0: call this funciton otw return w0, L0
         _ = self._sample_prior() # sample wt
-        Q_next = self.predict((phi_next))
+        Q_next = tf.einsum('ijk,jl->ik', phi_next, self.w0_bar)
         max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
         phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
 
@@ -248,7 +251,7 @@ def eGreedyAction(x, epsilon=0.9):
 # Main Routine ===========================================================================
 
 # epsilon-greedy
-eps = 0.5
+eps = 0.
 #deps = (eps- 0.1)/ FLAGS.N_episodes
 
 # get TF logger --------------------------------------------------------------------------
