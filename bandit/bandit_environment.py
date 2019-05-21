@@ -22,8 +22,9 @@ class bandit_environment():
         # features
         self.state = np.linspace(0., 1., self.n_bandits).reshape(-1,1) # 1D array
 
-        self.psi = np.concatenate([np.sin(4.1* np.pi* self.state- 0.2),
-                                    np.sin(4.1* np.pi* self.state- 0.2)], axis= 1)
+        self.psi = np.concatenate([np.sin(4.2* np.pi* self.state- 0.3),
+                                   np.sin(4.2 * np.pi * self.state - 0.3- np.pi/2.),
+                                   np.sin(4.2* np.pi* self.state- 0.3- np.pi)], axis= 1)
 
         # initial state
         self.bandit = 0

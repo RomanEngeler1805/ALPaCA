@@ -1,0 +1,23 @@
+2019-05-21 11:12:22,170 - Train - INFO - Parameters
+2019-05-21 11:12:22,170 - Train - INFO - latent_space=16
+2019-05-21 11:12:22,170 - Train - INFO - N_tasks=2
+2019-05-21 11:12:22,170 - Train - INFO - action_space=3
+2019-05-21 11:12:22,170 - Train - INFO - hidden_space=32
+2019-05-21 11:12:22,170 - Train - INFO - learning_rate=0.02
+2019-05-21 11:12:22,170 - Train - INFO - replay_memory_size=100
+2019-05-21 11:12:22,170 - Train - INFO - batch_size=2
+2019-05-21 11:12:22,170 - Train - INFO - iter_amax=3
+2019-05-21 11:12:22,170 - Train - INFO - state_space=1
+2019-05-21 11:12:22,170 - Train - INFO - non_linearity=tanh
+2019-05-21 11:12:22,170 - Train - INFO - prior_precision=0.5
+2019-05-21 11:12:22,170 - Train - INFO - N_episodes=30000
+2019-05-21 11:12:22,170 - Train - INFO - L_episode=15
+2019-05-21 11:12:22,170 - Train - INFO - noise_precision=0.2
+2019-05-21 11:12:22,170 - Train - INFO - lr_drop=1.00015
+2019-05-21 11:12:22,170 - Train - INFO - gamma=0.0
+2019-05-21 11:12:22,170 - Train - INFO - update_freq=2
+2019-05-21 11:12:22,170 - Train - INFO - Build Tensorflow Graph
+2019-05-21 11:12:24,430 - Train - INFO - Save model snapshot
+2019-05-21 11:12:24,658 - Train - INFO - Loop over episodes
+2019-05-21 11:12:27,373 - Train - INFO - Episode     with R  11
+2019-05-21 11:12:27,984 - Train - INFO - Episode     with time per episode  3.33

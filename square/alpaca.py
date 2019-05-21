@@ -20,21 +20,22 @@ np.random.seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 2, "Dimensionality of action space")
+tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 1, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 32, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of hidden space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
-tf.flags.DEFINE_float("learning_rate", 3e-2, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.3, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.2, "Noise precision (1/var)")
 tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 15, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 2, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 3, "Number of iterations performed to determine amax")
+tf.flags.DEFINE_string('non_linearity', 'tanh', 'Non-linearity used in encoder.')
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
@@ -59,8 +60,8 @@ class QNetwork():
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
             hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
-            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
-            hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=None)
+            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
+            hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
             # needs to be done this manner due to the way tf reshapes arrays
@@ -75,7 +76,10 @@ class QNetwork():
         state = tf.expand_dims(state, axis=1)
         state = tf.tile(state, [1, 1, self.action_dim])
         state = tf.reshape(state, [-1, self.state_dim])
-        state = tf.concat([state, tf.reshape(action, [-1, 1])], axis = 1)
+
+        action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
+
+        state = tf.concat([state, action], axis = 1)
 
         return state
 
@@ -93,7 +97,7 @@ class QNetwork():
         # append action s.t. it is an input to the network
         (bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
 
-        context_action_augm = tf.range(self.action_dim, dtype=tf.float32)
+        context_action_augm = tf.range(self.action_dim, dtype=tf.int32)
         context_action_augm = tf.tile(context_action_augm, [bsc])
 
         context_state = self.state_trafo(self.context_state, context_action_augm)
@@ -114,7 +118,7 @@ class QNetwork():
         # append action s.t. it is an input to the network
         (bs, _) = tf.unstack(tf.to_int32(tf.shape(self.state)))
 
-        action_augm = tf.range(self.action_dim, dtype=tf.float32)
+        action_augm = tf.range(self.action_dim, dtype=tf.int32)
         action_augm = tf.tile(action_augm, [bs])
 
         state = self.state_trafo(self.state, action_augm)
@@ -398,6 +402,9 @@ with tf.Session() as sess:
     log.info('Loop over episodes')
     for episode in range(FLAGS.N_episodes):
 
+        # time measurement
+        start = time.time()
+
         # count reward
         rw = []
 
@@ -421,6 +428,7 @@ with tf.Session() as sess:
             step = 0
 
             while step < FLAGS.L_episode:
+
                 # take a step
                 Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(1,-1)})
                 action = eGreedyAction(Qval, eps)
@@ -478,10 +486,12 @@ with tf.Session() as sess:
 
                             Q0 = np.dot(phi[:, :, act], w0_bar)
 
+                            delta = np.where(action_train == act) # to visualize which action network took
+
                             ax[act].plot(np.linspace(0., env_nb, env_nb), env_r, 'r')
                             ax[act].plot(np.linspace(0., env_nb, env_nb), Q_r, 'b')
                             ax[act].plot(np.linspace(0., env_nb, env_nb), Q0, 'b--')
-                            ax[act].scatter(state_train*env_nb, reward_train, marker='x', color='r')
+                            ax[act].scatter(state_train[delta]*env_nb, reward_train[delta], marker='x', color='r')
                             ax[act].fill_between(np.linspace(0., env_nb, env_nb), Q_r - dQ_r, Q_r + dQ_r, alpha=0.5)
 
 
@@ -502,7 +512,8 @@ with tf.Session() as sess:
             # append episode buffer to large buffer
             fullbuffer.add(tempbuffer.buffer)
 
-        log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
+        if episode % 1000 == 0:
+            log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
         # learning rate schedule
         if learning_rate > 5e-5:
@@ -621,7 +632,7 @@ with tf.Session() as sess:
         # print to console
         if episode % 500 == 0:
             print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
-            print('Learning_rate: '+ str(learning_rate)+ ', Nprec: '+ str(noise_precision))
+            print('Learning_rate: '+ str(np.round(learning_rate,5))+ ', Nprec: '+ str(noise_precision))
 
             # plot w* phi
             env_psi = env.psi
@@ -651,6 +662,9 @@ with tf.Session() as sess:
 
             plt.savefig(r0_dir+'Epoch_'+str(episode)+'_Reward')
             plt.close()
+
+        if episode % 1000 == 0:
+            log.info('Episode %3.d with time per episode %5.2f', episode, (time.time()- start))
 
 
     # reset buffers
