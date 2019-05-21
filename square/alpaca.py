@@ -4,37 +4,36 @@ Class structure for ALPaCA meta-RL code
 
 import numpy as np
 import tensorflow as tf
-import sys
-import random
-from collections import Counter
 import os
 import time
 import logging
 import matplotlib.pyplot as plt
 
-from replay_buffer import replay_buffer
 from square_environment import square_environment
-from bandit_environment import bandit_environment
+
+import sys
+sys.path.insert(0, './..')
+from replay_buffer import replay_buffer
 
 np.random.seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
+tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 1, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 32, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of hidden space")
-tf.flags.DEFINE_float("gamma", 0., "Discount factor")
+tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 0.2, "Noise precision (1/var)")
 tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 15, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
-tf.flags.DEFINE_integer("update_freq", 2, "Update frequency of posterior and sampling of new policy")
-tf.flags.DEFINE_integer("iter_amax", 3, "Number of iterations performed to determine amax")
+tf.flags.DEFINE_integer("update_freq", 5, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_integer("iter_amax", 2, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_string('non_linearity', 'tanh', 'Non-linearity used in encoder.')
 
 FLAGS = tf.flags.FLAGS
@@ -77,9 +76,9 @@ class QNetwork():
         state = tf.tile(state, [1, 1, self.action_dim])
         state = tf.reshape(state, [-1, self.state_dim])
 
-        action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
+        #action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
 
-        state = tf.concat([state, action], axis = 1)
+        state = tf.concat([state, tf.reshape(action, [-1,1])], axis = 1)
 
         return state
 
@@ -361,7 +360,7 @@ log.info('Build Tensorflow Graph')
 QNet = QNetwork() # neural network
 
 # initialize environment
-env = bandit_environment()
+env = square_environment()
 
 with tf.Session() as sess:
     # set random seed
