@@ -23,7 +23,7 @@ class square_environment():
         ''' reset the environment to its initial state '''
         self.__init__()
 
-        return np.append(self.state.flatten(), 0.)
+        return self.state.flatten()
 
     def reward(self):
         ''' reward function '''
@@ -74,6 +74,6 @@ class square_environment():
                 self.state[posx - 1, posy] = 1
 
         # stack observation
-        obs = np.array([np.append(self.state.flatten(), r), r, d])
+        obs = np.array([self.state.flatten(), r, d])
 
         return obs

@@ -20,15 +20,15 @@ np.random.seed(1234)
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
-tf.flags.DEFINE_integer("state_space", 25, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 32, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("state_space", 26, "Dimensionality of state space")
+tf.flags.DEFINE_integer("hidden_space", 32, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of hidden space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.00005, "Drop of learning rate per episode")
-tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.005, "Noise precision (1/var)")
-tf.flags.DEFINE_integer("N_episodes", 100000, "Number of episodes")
+tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.2, "Noise precision (1/var)")
+tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
@@ -59,7 +59,7 @@ class QNetwork():
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
             hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
-            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
+            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
             hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
@@ -96,7 +96,7 @@ class QNetwork():
         # append action s.t. it is an input to the network
         (bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
 
-        context_action_augm = tf.range(self.action_dim, dtype=tf.float32)
+        context_action_augm = tf.range(self.action_dim, dtype=tf.int32)
         context_action_augm = tf.tile(context_action_augm, [bsc])
 
         context_state = self.state_trafo(self.context_state, context_action_augm)
@@ -117,7 +117,7 @@ class QNetwork():
         # append action s.t. it is an input to the network
         (bs, _) = tf.unstack(tf.to_int32(tf.shape(self.state)))
 
-        action_augm = tf.range(self.action_dim, dtype=tf.float32)
+        action_augm = tf.range(self.action_dim, dtype=tf.int32)
         action_augm = tf.tile(action_augm, [bs])
 
         state = self.state_trafo(self.state, action_augm)
@@ -141,12 +141,12 @@ class QNetwork():
         self.wt = tf.get_variable('wt', shape=[self.latent_dim,1], trainable=False)
         self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
 
+        self.Qout2 = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout2')
+
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
         self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec)*tf.eye(self.latent_dim)) # cholesky
         self.L0 = tf.matmul(self.L0_asym, tf.transpose(self.L0_asym))  # \Lambda_0
-
-        self.Qout2 = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout2')
 
         self.sample_prior = self._sample_prior()
 
@@ -466,22 +466,23 @@ with tf.Session() as sess:
                     if (episode) % 1000 == 0 and n == 0:
                         tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
                         # state value
-                        V_TS = np.zeros([FLAGS.state_space])
-                        for i in range(FLAGS.state_space):
+                        V_M = np.zeros([FLAGS.state_space - 1])
+                        V_TS = np.zeros([FLAGS.state_space - 1])
+                        for i in range(FLAGS.state_space - 1):
                             ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
                             ss[i] = 1
                             # i/5 downwards, i%5 rightwards
                             #if i / 5 == tar[0] and i % 5 == tar[1]:  # add reward at target location
                             #    ss[FLAGS.state_space - 1] = 1.
 
-                            Qout = sess.run([QNet.Qout], feed_dict={QNet.state: ss.reshape(1, -1), QNet.nprec: noise_precision})
+                            Qout, Qout2 = sess.run([QNet.Qout, QNet.Qout2],
+                                                   feed_dict={QNet.state: ss.reshape(1, -1), QNet.nprec: noise_precision})
                             V_TS[i] = np.max(Qout)
+                            V_M[i] = np.max(Qout2)
 
                         #
                         fig, ax = plt.subplots()
                         im = ax.imshow(V_TS.reshape(5, 5))
-
-                        ax.plot(tar[1], tar[0], 'ro', markersize=20)
 
                         pos = np.argmax(state)
                         # i/5 downwards, i%5 rightwards.
@@ -489,10 +490,23 @@ with tf.Session() as sess:
                         ypos = pos / 5
                         ax.plot(xpos, ypos, 'bo', markersize=20)  # imshow makes y-axis pointing downwards
 
+                        ax.plot(tar[1], tar[0], 'ro', markersize=20)
+
                         fig.colorbar(im)
                         plt.savefig(V_TS_dir + 'Epoch_' + str(episode) + '_Step_' + str(step))
                         plt.close()
 
+                        #
+                        fig, ax = plt.subplots()
+                        im = ax.imshow(V_M.reshape(5, 5))
+
+                        ax.plot(xpos, ypos, 'bo', markersize=20)
+
+                        ax.plot(tar[1], tar[0], 'ro', markersize=20)
+
+                        fig.colorbar(im)
+                        plt.savefig(V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step))
+                        plt.close()
 
                     # -----------------------------------------------------------------------
 
@@ -517,7 +531,7 @@ with tf.Session() as sess:
         if learning_rate > 5e-5:
             learning_rate /= FLAGS.lr_drop
 
-        if noise_precision <0.2 and episode% 5000 == 0:
+        if noise_precision <8 and episode% 1000 == 0:
             noise_precision*= 1.5
 
 
@@ -633,22 +647,15 @@ with tf.Session() as sess:
             print('Learning_rate: '+ str(np.round(learning_rate,5))+ ', Nprec: '+ str(noise_precision))
 
             #
-            state_train = np.zeros([FLAGS.L_episode, FLAGS.state_space])
-
-            # fill arrays
-            for k, experience in enumerate(tempbuffer.buffer):
-                # [s, a, r, s', a*, d]
-                state_train[k] = experience[0]
-
             tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
             # state value
-            V_M = np.zeros([FLAGS.state_space])
-            for i in range(FLAGS.state_space):
+            V_M = np.zeros([FLAGS.state_space - 1])
+            for i in range(FLAGS.state_space - 1):
                 ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
                 ss[i] = 1
                 # i/5 downwards, i%5 rightwards
-                #if i / 5 == tar[0] and i % 5 == tar[1]:  # add reward at target location
-                #    ss[FLAGS.state_space - 1] = 0.
+                if i / 5 == tar[0] and i % 5 == tar[1]:  # add reward at target location
+                    ss[FLAGS.state_space - 1] = 0.
 
                 Qout2, L0, Sigma_e, phi = sess.run([QNet.Qout2, QNet.L0, QNet.Sigma_e, QNet.phi],
                                                    feed_dict={QNet.state: ss.reshape(1, -1), QNet.nprec: noise_precision})
@@ -658,14 +665,13 @@ with tf.Session() as sess:
             fig, ax = plt.subplots()
             im = ax.imshow(V_M.reshape(5, 5))
 
-            pos = np.argmax(state_train, axis=1)
+            pos = np.argmax(state)
             # i/5 downwards, i%5 rightwards.
             xpos = pos % 5
             ypos = pos / 5
-
             ax.plot(xpos, ypos, 'bo', markersize=20)  # imshow makes y-axis pointing downwards
 
-            ax.plot(tar[1], tar[0], 'ro', markersize=15)
+            ax.plot(tar[1], tar[0], 'ro', markersize=20)
 
             fig.colorbar(im)
             plt.savefig(V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step))
