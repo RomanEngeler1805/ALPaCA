@@ -60,16 +60,16 @@ class square_environment():
         r = self.reward()
 
         if not d:
-            if action == 1 and posy != 0:
+            if action == 1 and posy != 0: # left
                 self.state[posx, posy] = 0
                 self.state[posx, posy - 1] = 1
-            if action == 2 and posx != self.size-1:
+            if action == 2 and posx != self.size-1: # down
                 self.state[posx, posy] = 0
                 self.state[posx + 1, posy] = 1
-            if action == 3 and posy != self.size-1:
+            if action == 3 and posy != self.size-1: # right
                 self.state[posx, posy] = 0
                 self.state[posx, posy + 1] = 1
-            if action == 4 and posx != 0:
+            if action == 4 and posx != 0: # up
                 self.state[posx, posy] = 0
                 self.state[posx - 1, posy] = 1
 

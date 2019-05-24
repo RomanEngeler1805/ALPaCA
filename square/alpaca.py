@@ -22,12 +22,12 @@ tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 25, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 32, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("latent_space", 32, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
-tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.00005, "Drop of learning rate per episode")
-tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.005, "Noise precision (1/var)")
+tf.flags.DEFINE_float("learning_rate", 1e-2, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("prior_precision", 0.05, "Prior precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.05, "Noise precision (1/var)")
 tf.flags.DEFINE_integer("N_episodes", 100000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
@@ -67,18 +67,21 @@ class QNetwork():
             hidden3_rs = tf.reshape(hidden3, [-1, self.action_dim, self.latent_dim])
             hidden3_rs = tf.transpose(hidden3_rs, [0, 2, 1])
 
-
         return hidden3_rs
 
     def state_trafo(self, state, action):
         ''' append action to the state '''
-        state = tf.expand_dims(state, axis=1)
-        state = tf.tile(state, [1, 1, self.action_dim])
-        state = tf.reshape(state, [-1, self.state_dim])
-
+        state = tf.expand_dims(state, axis=2)
+        #state = tf.tile(state, [1, 1, self.action_dim])
+        #state = tf.reshape(state, [-1, self.state_dim])
         #action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
+        #state = tf.concat([state, tf.reshape(action, [-1,1])], axis = 1)
 
-        state = tf.concat([state, tf.reshape(action, [-1,1])], axis = 1)
+        state = tf.tile(state, [1, 1, self.action_dim* self.action_dim])
+
+        state = tf.einsum('bsa,a->bsa', state, action)
+        state = tf.transpose(state, [0, 2, 1])
+        state = tf.reshape(state, [-1, self.action_dim* self.state_dim])
 
         return state
 
@@ -96,8 +99,10 @@ class QNetwork():
         # append action s.t. it is an input to the network
         (bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
 
-        context_action_augm = tf.range(self.action_dim, dtype=tf.float32)
-        context_action_augm = tf.tile(context_action_augm, [bsc])
+        context_action_augm = tf.range(self.action_dim, dtype=tf.int32)
+        #context_action_augm = tf.tile(context_action_augm, [bsc])
+        context_action_augm = tf.one_hot(context_action_augm, self.action_dim)
+        context_action_augm = tf.reshape(context_action_augm, [-1])
 
         context_state = self.state_trafo(self.context_state, context_action_augm)
         context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
@@ -117,8 +122,10 @@ class QNetwork():
         # append action s.t. it is an input to the network
         (bs, _) = tf.unstack(tf.to_int32(tf.shape(self.state)))
 
-        action_augm = tf.range(self.action_dim, dtype=tf.float32)
-        action_augm = tf.tile(action_augm, [bs])
+        action_augm = tf.range(self.action_dim, dtype=tf.int32)
+        #action_augm = tf.tile(action_augm, [bs])
+        action_augm = tf.one_hot(action_augm, self.action_dim)
+        action_augm = tf.reshape(action_augm, [-1])
 
         state = self.state_trafo(self.state, action_augm)
         state_next = self.state_trafo(self.state_next, action_augm)
@@ -483,7 +490,7 @@ with tf.Session() as sess:
 
                         ax.plot(tar[1], tar[0], 'ro', markersize=20)
 
-                        pos = np.argmax(state)
+                        pos = np.argmax(state_train, axis=1)
                         # i/5 downwards, i%5 rightwards.
                         xpos = pos % 5
                         ypos = pos / 5
@@ -508,20 +515,111 @@ with tf.Session() as sess:
                 # -----------------------------------------------------------------------
 
             # append episode buffer to large buffer
-            fullbuffer.add(tempbuffer.buffer)
+            # fullbuffer.add(tempbuffer.buffer)
 
         if episode % 1000 == 0:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
         # learning rate schedule
-        if learning_rate > 5e-5:
+        if learning_rate > 1e-4:
             learning_rate /= FLAGS.lr_drop
 
-        if noise_precision <0.2 and episode% 5000 == 0:
+        if noise_precision <2.0 and episode% 5000 == 0:
             noise_precision*= 1.5
 
 
-        # Gradient descent
+        # ===============================================================================
+        if episode % 4 == 0:
+            tempbuffer.reset()
+
+            actions = np.zeros([FLAGS.L_episode])
+            actions[0:8] = [4, 3, 4, 3, 2, 2, 2, 2]
+
+            rewards = np.zeros([FLAGS.L_episode])
+            rewards[8:] = 1
+
+            state = env.reset()
+
+            for i in range(FLAGS.L_episode):
+                next_state, reward, done = env.step(actions[i])
+
+                # store experience in memory
+                new_experience = [state, actions[i], rewards[i], next_state, done]
+                tempbuffer.add(new_experience)
+
+                state = next_state
+
+            fullbuffer.add(tempbuffer.buffer)
+
+        if episode % 4 == 1:
+            tempbuffer.reset()
+
+            actions = np.zeros([FLAGS.L_episode])
+            actions[0:4] = [4, 3, 4, 3]
+
+            rewards = np.zeros([FLAGS.L_episode])
+            rewards[4:] = 1
+
+            state = env.reset()
+
+            for i in range(FLAGS.L_episode):
+                next_state, reward, done = env.step(actions[i])
+
+                # store experience in memory
+                new_experience = [state, actions[i], rewards[i], next_state, done]
+                tempbuffer.add(new_experience)
+
+                state = next_state
+
+            fullbuffer.add(tempbuffer.buffer)
+
+
+        if episode % 4 == 2:
+            tempbuffer.reset()
+
+            actions = np.zeros([FLAGS.L_episode])
+            actions[0:8] = [2, 3, 2, 3, 4, 4, 4, 4]
+
+            rewards = np.zeros([FLAGS.L_episode])
+            rewards[8:] = 1
+
+            state = env.reset()
+
+            for i in range(FLAGS.L_episode):
+                next_state, reward, done = env.step(actions[i])
+
+                # store experience in memory
+                new_experience = [state, actions[i], rewards[i], next_state, done]
+                tempbuffer.add(new_experience)
+
+                state = next_state
+
+            fullbuffer.add(tempbuffer.buffer)
+
+        if episode % 4 == 3:
+            tempbuffer.reset()
+
+            actions = np.zeros([FLAGS.L_episode])
+            actions[0:4] = [2, 3, 2, 3]
+
+            rewards = np.zeros([FLAGS.L_episode])
+            rewards[4:] = 1
+
+            state = env.reset()
+
+            for i in range(FLAGS.L_episode):
+                next_state, reward, done = env.step(actions[i])
+
+                # store experience in memory
+                new_experience = [state, actions[i], rewards[i], next_state, done]
+                tempbuffer.add(new_experience)
+
+                state = next_state
+
+            fullbuffer.add(tempbuffer.buffer)
+
+
+        # Gradient descent ===============================================================
         for e in range(batch_size):
 
             # sample from larger buffer [s, a, r, s', d] with current experience not yet included
