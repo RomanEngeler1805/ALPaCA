@@ -17,9 +17,8 @@ class bandit_environment():
         # draw new theta
         self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
 
-        # state
-        st = np.linspace(0, 1, 100)
-        self.state = st[np.random.randint(100)]#np.array([np.random.rand()])
+        # features
+        self.state = np.array([np.random.rand()])
 
     def _sample_env(self):
         ''' resample theta '''
@@ -27,12 +26,9 @@ class bandit_environment():
 
     def _sample_state(self):
         ''' resample state '''
-        #state = np.array([np.random.rand()])
+        self.state = np.array([np.random.rand()])
+        return self.state
 
-        st = np.linspace(0, 1, 100)
-        state = st[np.random.randint(100)]
-
-        return state
 
     def _psi(self, state):
         ''' used to query environment '''
@@ -48,15 +44,12 @@ class bandit_environment():
 
         psi = self._psi(self.state)[0]
 
-        print('-------------')
-        print(psi)
-
         r = np.dot(self.theta, psi[action])
 
         d = 0
 
         # resample random data point
-        self.state = self._sample_state()
+        self._sample_state()
 
         # observe (untransformed) state and reward
         obs = np.array([self.state.flatten(), r, d])

@@ -33,7 +33,7 @@ tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 15, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 2, "Update frequency of posterior and sampling of new policy")
-tf.flags.DEFINE_integer("iter_amax", 3, "Number of iterations performed to determine amax")
+tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_string('non_linearity', 'tanh', 'Non-linearity used in encoder.')
 
 FLAGS = tf.flags.FLAGS
@@ -413,10 +413,10 @@ with tf.Session() as sess:
             tempbuffer.reset()
 
             # sample theta (i.e. bandit)
-            env.sample_env()
+            env._sample_env()
 
             # resample state
-            state = env.sample_state()
+            state = env._sample_state()
 
             rw.append(0)
 
@@ -429,9 +429,9 @@ with tf.Session() as sess:
             while step < FLAGS.L_episode:
 
                 # take a step
-                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(1,-1)})
+                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,1)})
                 action = eGreedyAction(Qval, eps)
-                next_state, reward, done = env.step(action)
+                next_state, reward, done = env._step(action)
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
@@ -466,13 +466,11 @@ with tf.Session() as sess:
                     if episode % 1000 == 0 and n == 0:
 
                         # plot w* phi
-                        env_psi = env.psi
+                        env_state = np.linspace(0, 1, 100)
+                        env_psi = env._psi(env_state)
                         env_theta = env.theta
-                        env_nb = env.n_bandits
 
-                        env_state = env.state
-
-                        phi, w0_bar, Sigma_e = sess.run([QNet.phi, QNet.w0_bar, QNet.Sigma_e], feed_dict={QNet.state: env_state,
+                        phi, w0_bar, Sigma_e = sess.run([QNet.phi, QNet.w0_bar, QNet.Sigma_e], feed_dict={QNet.state: env_state.reshape(-1,1),
                                                                                                           QNet.nprec: noise_precision})
 
                         fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20, 5])
@@ -487,11 +485,11 @@ with tf.Session() as sess:
 
                             delta = np.where(action_train == act) # to visualize which action network took
 
-                            ax[act].plot(np.linspace(0., env_nb, env_nb), env_r, 'r')
-                            ax[act].plot(np.linspace(0., env_nb, env_nb), Q_r, 'b')
-                            ax[act].plot(np.linspace(0., env_nb, env_nb), Q0, 'b--')
-                            ax[act].scatter(state_train[delta]*env_nb, reward_train[delta], marker='x', color='r')
-                            ax[act].fill_between(np.linspace(0., env_nb, env_nb), Q_r - dQ_r, Q_r + dQ_r, alpha=0.5)
+                            ax[act].plot(env_state, env_r, 'r')
+                            ax[act].plot(env_state, Q_r, 'b')
+                            ax[act].plot(env_state, Q0, 'b--')
+                            ax[act].scatter(state_train[delta], reward_train[delta], marker='x', color='r')
+                            ax[act].fill_between(env_state, Q_r - dQ_r, Q_r + dQ_r, alpha=0.5)
 
 
                         plt.savefig(rt_dir + 'Epoch_' + str(episode)+ '_step_'+ str(step) + '_Reward')
@@ -518,7 +516,7 @@ with tf.Session() as sess:
         if learning_rate > 5e-5:
             learning_rate /= FLAGS.lr_drop
 
-        if noise_precision <8 and episode% 1000 == 0:
+        if noise_precision < 2 and episode % 1000 == 0:
             noise_precision*= 1.5
 
 
@@ -634,14 +632,12 @@ with tf.Session() as sess:
             print('Learning_rate: '+ str(np.round(learning_rate,5))+ ', Nprec: '+ str(noise_precision))
 
             # plot w* phi
-            env_psi = env.psi
+            env_state = np.linspace(0, 1, 100)
+            env_psi = env._psi(env_state)
             env_mu = env.mu
-            env_nb = env.n_bandits
-
-            env_state = env.state
 
             w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
-                                                feed_dict={QNet.state: env_state, QNet.nprec: noise_precision})
+                                                feed_dict={QNet.state: env_state.reshape(-1,1), QNet.nprec: noise_precision})
 
             #np.set_printoptions(suppress=True)
             #print('w0_bar: '+ str(np.round(w0_bar.reshape(1, -1), 2))+ ',  L0: '+ str(np.round(L0.reshape(1, -1), 2)))
@@ -655,9 +651,9 @@ with tf.Session() as sess:
                 Q_r = np.dot(phi[:, :, act], w0_bar[:, 0])
                 dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])+ Sigma_e
 
-                ax[act].plot(np.linspace(0., env_nb, env_nb), env_r, 'r')
-                ax[act].plot(np.linspace(0., env_nb, env_nb), Q_r, 'b')
-                ax[act].fill_between(np.linspace(0., env_nb, env_nb), Q_r- dQ_r, Q_r+ dQ_r, alpha=0.5)
+                ax[act].plot(env_state, env_r, 'r')
+                ax[act].plot(env_state, Q_r, 'b')
+                ax[act].fill_between(env_state, Q_r- dQ_r, Q_r+ dQ_r, alpha=0.5)
 
             plt.savefig(r0_dir+'Epoch_'+str(episode)+'_Reward')
             plt.close()
