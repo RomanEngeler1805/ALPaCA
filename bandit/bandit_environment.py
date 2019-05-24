@@ -9,8 +9,6 @@ class bandit_environment():
 
         # state dimensions
         self.n_dim = 1
-        # number of bandits
-        self.n_bandits = 100
 
         # distribution of theta
         self.L = 1. * np.eye(self.n_dim)  # cholesky of variance (Var= L^T L)
@@ -19,36 +17,48 @@ class bandit_environment():
         # draw new theta
         self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
 
-        # features
-        self.state = np.linspace(0., 1., self.n_bandits).reshape(-1,1) # 1D array
+        # state
+        st = np.linspace(0, 1, 100)
+        self.state = st[np.random.randint(100)]#np.array([np.random.rand()])
 
-        self.psi = np.concatenate([np.sin(4.2* np.pi* self.state- 0.3),
-                                   np.sin(4.2 * np.pi * self.state - 0.3- np.pi/2.),
-                                   np.sin(4.2* np.pi* self.state- 0.3- np.pi)], axis= 1)
-
-        # initial state
-        self.bandit = 0
-
-    def sample_env(self):
+    def _sample_env(self):
         ''' resample theta '''
         self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
 
-    def sample_state(self):
+    def _sample_state(self):
         ''' resample state '''
-        self.bandit = np.random.randint(self.n_bandits) # resample random data point
-        return self.state[self.bandit]
+        #state = np.array([np.random.rand()])
 
-    def step(self, action):
+        st = np.linspace(0, 1, 100)
+        state = st[np.random.randint(100)]
+
+        return state
+
+    def _psi(self, state):
+        ''' used to query environment '''
+        state = state.reshape(-1, 1)
+
+        psi = np.concatenate([np.sin(4.2 * np.pi * state - 0.3),
+                              np.sin(4.2 * np.pi * state - 0.3 - np.pi / 2.),
+                              np.sin(4.2 * np.pi * state - 0.3 - np.pi)], axis=1)
+        return psi
+
+    def _step(self, action):
         ''' interact with environment and return observation [s', r, d] '''
 
-        r = np.dot(self.theta, self.psi[self.bandit, action])
+        psi = self._psi(self.state)[0]
+
+        print('-------------')
+        print(psi)
+
+        r = np.dot(self.theta, psi[action])
 
         d = 0
 
         # resample random data point
-        self.bandit = np.random.randint(self.n_bandits)
+        self.state = self._sample_state()
 
         # observe (untransformed) state and reward
-        obs = np.array([self.state[self.bandit].flatten(), r, d])
+        obs = np.array([self.state.flatten(), r, d])
 
         return obs
