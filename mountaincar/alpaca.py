@@ -9,7 +9,7 @@ import time
 import logging
 import matplotlib.pyplot as plt
 
-import gym
+from mountain_car import MountainCarEnv
 
 import sys
 sys.path.insert(0, './..')
@@ -21,18 +21,18 @@ np.random.seed(1234)
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 2, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 32, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("hidden_space", 32, "Dimensionality of hidden space") # change
+tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of hidden space") # change
 tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
-tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
-tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.2, "Noise precision (1/var)")
+tf.flags.DEFINE_float("learning_rate", 1e-2, "Initial learning rate") # change
+tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode") # change
+tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.2, "Noise precision (1/var)") # change
 tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 15, "Length of episodes")
-tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
-tf.flags.DEFINE_integer("update_freq", 2, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
+tf.flags.DEFINE_integer("replay_memory_size", 50, "Size of replay memory")
+tf.flags.DEFINE_integer("update_freq", 220 , "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 3, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_string('non_linearity', 'tanh', 'Non-linearity used in encoder.')
 
@@ -58,9 +58,9 @@ class QNetwork():
         ''' Embedding into latent space '''
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
-            hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
-            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
-            hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
+            hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.relu)
+            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.relu)
+            hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=tf.nn.relu)
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
             # needs to be done this manner due to the way tf reshapes arrays
@@ -76,9 +76,9 @@ class QNetwork():
         state = tf.tile(state, [1, 1, self.action_dim])
         state = tf.reshape(state, [-1, self.state_dim])
 
-        action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
-
-        state = tf.concat([state, action], axis = 1)
+        #action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
+        #state = tf.concat([state, action], axis = 1)
+        state = tf.concat([state, tf.reshape(action, [-1,1])], axis = 1)
 
         return state
 
@@ -179,7 +179,7 @@ class QNetwork():
 
         # last factor to account for case that s is terminating state
         Qmax = tf.einsum('im,bi->b', self.wt_bar, phi_max, name='Qmax')
-        self.Qtarget = self.reward + FLAGS.gamma * Qmax
+        self.Qtarget = self.reward + FLAGS.gamma * tf.multiply(1- self.done, Qmax)
         #self.Qtarget = tf.stop_gradient(self.Qtarget)
 
         # Q(s',a*)+ r- Q(s,a)
@@ -345,13 +345,13 @@ if not os.path.exists(saver_dir):
     os.makedirs(saver_dir)
 
 # folder for plotting --------------------------------------------------------------------
-rt_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/rt/'
-if not os.path.exists(rt_dir):
-    os.makedirs(rt_dir)
+Vt_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/rt/'
+if not os.path.exists(Vt_dir):
+    os.makedirs(Vt_dir)
 
-r0_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/r0/'
-if not os.path.exists(r0_dir):
-    os.makedirs(r0_dir)
+V0_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/r0/'
+if not os.path.exists(V0_dir):
+    os.makedirs(V0_dir)
 
 # initialize replay memory and model
 fullbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
@@ -360,7 +360,7 @@ log.info('Build Tensorflow Graph')
 QNet = QNetwork() # neural network
 
 # initialize environment
-env = gym.make('MountainCar-v0')
+env = MountainCarEnv() #gym.make('MountainCar-v0')
 
 with tf.Session() as sess:
     # set random seed
@@ -412,11 +412,8 @@ with tf.Session() as sess:
             # initialize buffer
             tempbuffer.reset()
 
-            # sample theta (i.e. bandit)
-            env.sample_env()
-
-            # resample state
-            state = env.sample_state()
+            # reset state
+            state = env.reset()
 
             rw.append(0)
 
@@ -429,13 +426,24 @@ with tf.Session() as sess:
             while step < FLAGS.L_episode:
 
                 # take a step
-                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(1,-1)})
+                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
                 action = eGreedyAction(Qval, eps)
-                next_state, reward, done = env.step(action)
+                next_state, reward, done, _ = env.step(action)
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
                 tempbuffer.add(new_experience)
+
+                # count rewad
+                rw.append(reward)
+
+                # update state, and counters
+                state = next_state
+                global_index += 1
+                step += 1
+
+                if done == 1:
+                    break
 
                 # update posterior
                 # TODO: could speed up by iteratively adding
@@ -456,55 +464,38 @@ with tf.Session() as sess:
                         done_train[k] = experience[4]
 
                     # update
-                    _, wt_bar, Lt_inv, phi_next, phi_taken = sess.run([QNet.sample_post, QNet.wt_bar, QNet.Lt_inv, QNet.context_phi_next, QNet.context_phi_taken],
+                    _, wt_bar, Lt_inv = sess.run([QNet.sample_post, QNet.wt_bar, QNet.Lt_inv],
                              feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                                         QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                         QNet.context_done: done_train,
                                         QNet.nprec: noise_precision})
 
-                    # plot
+                    # plot Value function
                     if episode % 1000 == 0 and n == 0:
+                        # generate grid
+                        minp = env.min_position
+                        maxp = env.max_position
+                        maxs = env.max_speed
 
-                        # plot w* phi
-                        env_psi = env.psi
-                        env_theta = env.theta
-                        env_nb = env.n_bandits
+                        velgrid = np.linspace(-maxs, maxs, 10)
+                        posgrid = np.linspace(-minp, maxp, 10)
 
-                        env_state = env.state
+                        mesh = np.meshgrid(posgrid, velgrid)
+                        meshgrid = np.concatenate([mesh[0].reshape(-1,1), mesh[1].reshape(-1,1)], axis=1)
 
-                        phi, w0_bar, Sigma_e = sess.run([QNet.phi, QNet.w0_bar, QNet.Sigma_e], feed_dict={QNet.state: env_state,
-                                                                                                          QNet.nprec: noise_precision})
+                        # value function
+                        phi_mesh= sess.run([QNet.phi], feed_dict={QNet.state: meshgrid})
 
-                        fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20, 5])
+                        print(phi_mesh.shape)
 
-                        for act in range(FLAGS.action_space):
-                            env_r = env_theta * env_psi[:, act]
+                        Qmesh = np.dot(wt_bar, phi_mesh)
 
-                            Q_r = np.dot(phi[:, :, act], wt_bar).reshape(-1)
-                            dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], Lt_inv, phi[:, :, act])+ Sigma_e
+                        Vmesh = np.max(Qmesh, axis=1)
 
-                            Q0 = np.dot(phi[:, :, act], w0_bar)
-
-                            delta = np.where(action_train == act) # to visualize which action network took
-
-                            ax[act].plot(np.linspace(0., env_nb, env_nb), env_r, 'r')
-                            ax[act].plot(np.linspace(0., env_nb, env_nb), Q_r, 'b')
-                            ax[act].plot(np.linspace(0., env_nb, env_nb), Q0, 'b--')
-                            ax[act].scatter(state_train[delta]*env_nb, reward_train[delta], marker='x', color='r')
-                            ax[act].fill_between(np.linspace(0., env_nb, env_nb), Q_r - dQ_r, Q_r + dQ_r, alpha=0.5)
-
-
-                        plt.savefig(rt_dir + 'Epoch_' + str(episode)+ '_step_'+ str(step) + '_Reward')
+                        fig, ax = plt.subplots(ncols=1, figsize=[15, 5])
+                        ax.imshow(Qmesh.reshape(10, 10))
+                        plt.savefig(Vt_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
                         plt.close()
-
-
-                # update state, and counters
-                state = next_state
-                global_index += 1
-                step += 1
-
-                # count rewad
-                rw.append(reward)
 
                 # -----------------------------------------------------------------------
 
@@ -515,10 +506,10 @@ with tf.Session() as sess:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
         # learning rate schedule
-        if learning_rate > 5e-5:
+        if learning_rate > 2e-4:
             learning_rate /= FLAGS.lr_drop
 
-        if noise_precision <8 and episode% 1000 == 0:
+        if noise_precision <2 and episode% 1500 == 0:
             noise_precision*= 1.5
 
 
@@ -528,11 +519,13 @@ with tf.Session() as sess:
             # sample from larger buffer [s, a, r, s', d] with current experience not yet included
             experience = fullbuffer.sample(1)
 
-            state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
-            action_sample = np.zeros((FLAGS.L_episode,))
-            reward_sample = np.zeros((FLAGS.L_episode,))
-            next_state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
-            done_sample = np.zeros((FLAGS.L_episode,))
+            L_experience = len(experience[0])
+
+            state_sample = np.zeros((L_experience, FLAGS.state_space))
+            action_sample = np.zeros((L_experience,))
+            reward_sample = np.zeros((L_experience,))
+            next_state_sample = np.zeros((L_experience, FLAGS.state_space))
+            done_sample = np.zeros((L_experience,))
 
             # fill arrays
             for k, (s0, a, r, s1, d) in enumerate(experience[0]):
@@ -543,10 +536,10 @@ with tf.Session() as sess:
                 done_sample[k] = d
 
             # split into context and prediction set
-            split = np.int(0.7* FLAGS.L_episode* np.random.rand())
+            split = 0 #np.int(0.7* FLAGS.L_episode* np.random.rand())
 
             train = np.arange(0, split)
-            valid = np.arange(split, FLAGS.L_episode)
+            valid = np.arange(split, L_experience)
 
             state_train = state_sample[train, :]
             action_train = action_sample[train]
@@ -566,6 +559,7 @@ with tf.Session() as sess:
                                                            QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                                            QNet.state: state_valid, QNet.action: action_valid,
                                                            QNet.reward: reward_valid, QNet.state_next: next_state_valid,
+                                                           QNet.done: done_valid,
                                                            QNet.lr_placeholder: learning_rate,
                                                            QNet.nprec: noise_precision})
 
@@ -588,6 +582,7 @@ with tf.Session() as sess:
         loss1_summary = tf.Summary(value=[tf.Summary.Value(tag='TDW_Loss', simple_value=(loss1Buffer/ batch_size))])
         loss2_summary = tf.Summary(value=[tf.Summary.Value(tag='Sig_Loss', simple_value=(loss2Buffer / batch_size))])
         reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw)))])
+        #variance_summary = tf.Summary(value=[tf.Summary.Value(tag='Position Variance', simple_value=(np.max(state_sample[:,0])- np.min(state_sample[:,0])))])
 
         learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
 
@@ -596,14 +591,12 @@ with tf.Session() as sess:
         summary_writer.add_summary(loss1_summary, episode)
         summary_writer.add_summary(loss2_summary, episode)
         summary_writer.add_summary(reward_summary, episode)
+        #summary_writer.add_summary(variance_summary, episode)
         summary_writer.add_summary(summaries_merged, episode)
         summary_writer.add_summary(learning_rate_summary, episode)
 
         # reset buffers
         for idx in range(len(gradBuffer)):
-            #grad_summary = tf.Summary(value=[tf.Summary.Value(tag='Hist'+ str(idx), values=gradBuffer[idx])])
-            #summary_writer.add_summary(grad_summary, episode)
-
             gradBuffer[idx] *= 0
 
         summary_writer.flush()
@@ -614,7 +607,7 @@ with tf.Session() as sess:
         loss2Buffer *= 0
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-        if episode == 0:
+        if episode < 2:
             batch_size *= 2
 
         # ===============================================================
@@ -633,33 +626,41 @@ with tf.Session() as sess:
             print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
             print('Learning_rate: '+ str(np.round(learning_rate,5))+ ', Nprec: '+ str(noise_precision))
 
-            # plot w* phi
-            env_psi = env.psi
-            env_mu = env.mu
-            env_nb = env.n_bandits
+            # plot Value function
+            Npts = 20
+            # generate grid
+            minp = env.min_position
+            maxp = env.max_position
+            maxs = env.max_speed
 
-            env_state = env.state
+            velgrid = np.linspace(-maxs, maxs, Npts)
+            posgrid = np.linspace(minp, maxp, Npts)
 
-            w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
-                                                feed_dict={QNet.state: env_state, QNet.nprec: noise_precision})
+            mesh = np.meshgrid(posgrid, velgrid)
+            meshgrid = np.concatenate([mesh[0].reshape(-1, 1), mesh[1].reshape(-1, 1)], axis=1)
 
-            #np.set_printoptions(suppress=True)
-            #print('w0_bar: '+ str(np.round(w0_bar.reshape(1, -1), 2))+ ',  L0: '+ str(np.round(L0.reshape(1, -1), 2)))
+            # value function
+            w0_bar, phi_mesh = sess.run([QNet.w0_bar, QNet.phi], feed_dict={QNet.state: meshgrid})
+            Qmesh = np.einsum('di,bdj->bj',  w0_bar, phi_mesh)
+            Vmesh = np.max(Qmesh, axis=1)
 
-            # plot prior
-            fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20,5])
+            # plot last trajectory
+            state_train = np.zeros([step, FLAGS.state_space])
+            for k, experience in enumerate(tempbuffer.buffer):
+                # [s, a, r, s', a*, d]
+                state_train[k] = experience[0]
 
-            for act in range(FLAGS.action_space):
-                env_r = env_mu * env_psi[:, act]
-
-                Q_r = np.dot(phi[:, :, act], w0_bar[:, 0])
-                dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])+ Sigma_e
-
-                ax[act].plot(np.linspace(0., env_nb, env_nb), env_r, 'r')
-                ax[act].plot(np.linspace(0., env_nb, env_nb), Q_r, 'b')
-                ax[act].fill_between(np.linspace(0., env_nb, env_nb), Q_r- dQ_r, Q_r+ dQ_r, alpha=0.5)
-
-            plt.savefig(r0_dir+'Epoch_'+str(episode)+'_Reward')
+            # figure
+            fig, ax = plt.subplots(ncols=1, figsize=[15, 5])
+            im = ax.imshow(Vmesh.reshape(Npts, Npts), origin='lower', extent=[minp,maxp,-maxs,maxs])
+            ax.set_aspect((maxp- minp)/(2* maxs))
+            fig.colorbar(im)
+            ax.set_xlim([minp, maxp])
+            ax.set_ylim([-maxs, maxs])
+            ax.set_xlabel('position')
+            ax.set_ylabel('velocity')
+            plt.scatter(state_train[:,0], state_train[:,1], s=5) # [pos, vel]
+            plt.savefig(V0_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
             plt.close()
 
         if episode % 1000 == 0:
