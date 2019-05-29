@@ -27,7 +27,12 @@ tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
+
 tf.flags.DEFINE_float("noise_precision", 0.2, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 5.0, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_integer("noise_Ndrop", 1500, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precstep", 1.5, "Step of noise precision s*=ds")
+
 tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 15, "Length of episodes")
@@ -516,8 +521,8 @@ with tf.Session() as sess:
         if learning_rate > 5e-5:
             learning_rate /= FLAGS.lr_drop
 
-        if noise_precision < 2 and episode % 1000 == 0:
-            noise_precision*= 1.5
+        if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
+            noise_precision *= FLAGS.noise_precstep
 
 
         # Gradient descent
