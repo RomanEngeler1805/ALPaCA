@@ -149,7 +149,6 @@ class QNetwork():
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
         self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec)*tf.eye(self.latent_dim)) # cholesky
-	    #L0_asym = tf.linalg.diag(self.L0_asym)
         self.L0 = tf.matmul(self.L0_asym, tf.transpose(self.L0_asym))  # \Lambda_0
 
         self.sample_prior = self._sample_prior()
@@ -432,7 +431,7 @@ with tf.Session() as sess:
             rw.append(0)
 
             # sample w from prior
-            sess.run([QNet.sample_prior])
+            sess.run([QNet.sample_prior], feed_dict={QNet.train_cov: train_cov})
 
             # loop steps
             step = 0
@@ -632,7 +631,7 @@ with tf.Session() as sess:
         loss2Buffer *= 0
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-	if episode < 2:
+        if episode < 2:
             batch_size *= 2
 
         # ===============================================================

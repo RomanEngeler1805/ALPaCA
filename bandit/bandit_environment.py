@@ -26,7 +26,7 @@ class bandit_environment():
     def _sample_env(self):
         ''' resample theta '''
         self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
-        self.phase = np.random.rand()* np.pi/2. # [0, pi]
+        self.phase = np.random.rand()* np.pi/2.
 
     def _sample_state(self):
         ''' resample state '''
