@@ -19,13 +19,13 @@ np.random.seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
+tf.flags.DEFINE_integer("action_space", 1, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 1, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 32, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of hidden space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("lr_drop", 1.0001, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
@@ -149,7 +149,8 @@ class QNetwork():
 
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
-        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec)*tf.eye(self.latent_dim)) # cholesky
+
+        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.eye(self.latent_dim))  # cholesky
         self.L0 = tf.matmul(self.L0_asym, tf.transpose(self.L0_asym))  # \Lambda_0
 
         self.sample_prior = self._sample_prior()
@@ -432,7 +433,7 @@ with tf.Session() as sess:
             rw.append(0)
 
             # sample w from prior
-            sess.run([QNet.sample_prior])
+            sess.run([QNet.sample_prior], feed_dict={QNet.train_cov: train_cov})
 
             # loop steps
             step = 0
@@ -497,11 +498,11 @@ with tf.Session() as sess:
 
                             delta = np.where(action_train == act) # to visualize which action network took
 
-                            ax[act].plot(env_state, env_r, 'r')
-                            ax[act].plot(env_state, Q_r, 'b')
-                            ax[act].plot(env_state, Q0, 'b--')
-                            ax[act].scatter(state_train[delta], reward_train[delta], marker='x', color='r')
-                            ax[act].fill_between(env_state, Q_r - dQ_r, Q_r + dQ_r, alpha=0.5)
+                            ax.plot(env_state, env_r, 'r')
+                            ax.plot(env_state, Q_r, 'b')
+                            ax.plot(env_state, Q0, 'b--')
+                            ax.scatter(state_train[delta], reward_train[delta], marker='x', color='r')
+                            ax.fill_between(env_state, Q_r - dQ_r, Q_r + dQ_r, alpha=0.5)
 
 
                         plt.savefig(rt_dir + 'Epoch_' + str(episode)+ '_step_'+ str(step) + '_Reward')
@@ -531,8 +532,8 @@ with tf.Session() as sess:
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
 
-        if episode == 10000:
-            train_cov = 1
+        if episode == 20000:
+            train_cov = 0
 
             gradBuffer = sess.run(tf.trainable_variables())  # get shapes of tensors
 
@@ -591,8 +592,6 @@ with tf.Session() as sess:
             for idx, grad in enumerate(grads): # grad[0] is gradient and grad[1] the variable itself
                 gradBuffer[idx] += (grad[0]/ batch_size)
 
-            gradBuffer[-1]*= (1.- np.exp(-episode/10000.))
-
             lossBuffer += loss
             loss0Buffer += loss0
             loss1Buffer += loss1
@@ -634,7 +633,7 @@ with tf.Session() as sess:
         loss2Buffer *= 0
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-        if episode == 0:
+        if episode < 2:
             batch_size *= 2
 
         # ===============================================================
@@ -655,7 +654,7 @@ with tf.Session() as sess:
 
             # plot w* phi
             env_state = np.linspace(0, 1, 100)
-            env_psi = env._psi(env_state, np.pi/2.* np.ones([3]))
+            env_psi = env._psi(env_state, np.pi/4.)
             env_mu = env.mu
 
             w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
@@ -673,9 +672,9 @@ with tf.Session() as sess:
                 Q_r = np.dot(phi[:, :, act], w0_bar[:, 0])
                 dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])+ Sigma_e
 
-                ax[act].plot(env_state, env_r, 'r')
-                ax[act].plot(env_state, Q_r, 'b')
-                ax[act].fill_between(env_state, Q_r- dQ_r, Q_r+ dQ_r, alpha=0.5)
+                ax.plot(env_state, env_r, 'r')
+                ax.plot(env_state, Q_r, 'b')
+                ax.fill_between(env_state, Q_r- dQ_r, Q_r+ dQ_r, alpha=0.5)
 
             plt.savefig(r0_dir+'Epoch_'+str(episode)+'_Reward')
             plt.close()

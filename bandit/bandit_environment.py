@@ -26,7 +26,7 @@ class bandit_environment():
     def _sample_env(self):
         ''' resample theta '''
         self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
-        self.phase = np.random.rand()* np.pi/2. # [0, pi/2]
+        self.phase = np.random.rand()* np.pi/2.
 
     def _sample_state(self):
         ''' resample state '''
@@ -38,9 +38,10 @@ class bandit_environment():
         ''' used to query environment '''
         state = state.reshape(-1, 1)
 
-        psi = np.concatenate([np.sin(4.2 * np.pi * state + phase - np.pi* 1./4.),
-                              np.sin(4.2 * np.pi * state + phase - np.pi* 2./4.),
-                              np.sin(4.2 * np.pi * state + phase - np.pi* 3./4.)], axis=1)
+        psi = np.sin(4.2 * np.pi * state + phase - np.pi* 1./4.)
+        #np.concatenate([np.sin(4.2 * np.pi * state + phase[0] - np.pi* 1./4.),
+        #                      np.sin(4.2 * np.pi * state + phase[1] - np.pi* 2./4.),
+        #                      np.sin(4.2 * np.pi * state + phase[2] - np.pi* 3./4.)], axis=1)
         return psi
 
     def _step(self, action):
