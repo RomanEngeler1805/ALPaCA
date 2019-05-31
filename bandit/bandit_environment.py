@@ -34,23 +34,23 @@ class bandit_environment():
         return self.state
 
 
-    def _psi(self, state):
+    def _psi(self, state, phase):
         ''' used to query environment '''
         state = state.reshape(-1, 1)
 
-        psi = np.concatenate([np.sin(4.2 * np.pi * state + self.phase - np.pi* 1./4.),
-                              np.sin(4.2 * np.pi * state + self.phase - np.pi* 2./4.),
-                              np.sin(4.2 * np.pi * state + self.phase - np.pi* 3./4.)], axis=1)
+        psi = np.concatenate([np.sin(4.2 * np.pi * state + phase - np.pi* 1./4.),
+                              np.sin(4.2 * np.pi * state + phase - np.pi* 2./4.),
+                              np.sin(4.2 * np.pi * state + phase - np.pi* 3./4.)], axis=1)
         return psi
 
     def _step(self, action):
         ''' interact with environment and return observation [s', r, d] '''
 
         # get encoding
-        psi = self._psi(self.state)[0]
+        psi = self._psi(self.state, self.phase)[0]
 
         # randomly perturbed reward
-        r = np.dot(self.theta, psi[action])+ 0.1* np.random.normal()
+        r = np.dot(self.theta, psi[action])#+ 0.1* np.random.normal()
 
         d = 0
 

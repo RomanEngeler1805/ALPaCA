@@ -28,7 +28,7 @@ tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 
-tf.flags.DEFINE_float("noise_precision", 0.2, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5.0, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1500, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precstep", 1.5, "Step of noise precision s*=ds")
@@ -64,7 +64,7 @@ class QNetwork():
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
             hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
-            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
+            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
             hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
@@ -92,6 +92,7 @@ class QNetwork():
         ''' constructing tensorflow model '''
         #
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
+        self.train_cov = tf.placeholder(tf.int32, shape=())
 
         # placeholders ====================================================================
         ## context data
@@ -161,6 +162,10 @@ class QNetwork():
         taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
         phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
 
+        self.L0 = tf.cond(self.train_cov> 0,
+                               lambda: self.L0,
+                               lambda: tf.stop_gradient(self.L0))
+
         # update posterior if there is data
         self.wt_bar, self.Lt_inv = tf.cond(bsc > 0,
                                             lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken,
@@ -197,7 +202,7 @@ class QNetwork():
         logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred))
 
         # loss
-        self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff,name='loss0')
+        self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
         self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
         self.loss2 = logdet_Sigma
         self.loss = self.loss1+ self.loss2 #tf.losses.mean_squared_error(self.Qtarget, self.Q)
@@ -206,7 +211,7 @@ class QNetwork():
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
 
         # gradient
-        tvars = tf.trainable_variables()
+        tvars = tf.trainable_variables() #[v for v in tf.trainable_variables() if v.name!='QNetwork/L0_asym:0']
         self.gradient_holders = []
         for idx, var in enumerate(tvars):
             placeholder = tf.placeholder(tf.float32, name=str(idx) + '_holder')
@@ -292,7 +297,7 @@ class QNetwork():
 
             # determine phi(max_action) based on Q determined by sampling wt from posterior
             _ = self._sample_posterior(wt_bar, Lt_inv)
-            Q_next = tf.einsum('i,jik->jk', tf.reshape(self.wt, [-1]), phi_next)
+            Q_next = tf.einsum('i,jik->jk', tf.reshape(self.wt, [-1]), phi_next) # XXXXX wt -> wt_bar
 
             max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
             phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
@@ -320,6 +325,7 @@ def eGreedyAction(x, epsilon=0.9):
 #
 batch_size = FLAGS.batch_size
 eps = 0.
+train_cov = 0
 
 # get TF logger --------------------------------------------------------------------------
 log = logging.getLogger('Train')
@@ -465,14 +471,15 @@ with tf.Session() as sess:
                              feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                                         QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                         QNet.context_done: done_train,
-                                        QNet.nprec: noise_precision})
+                                        QNet.nprec: noise_precision, QNet.train_cov: train_cov})
 
                     # plot
                     if episode % 1000 == 0 and n == 0:
 
                         # plot w* phi
                         env_state = np.linspace(0, 1, 100)
-                        env_psi = env._psi(env_state)
+                        env_phase = env.phase
+                        env_psi = env._psi(env_state, env_phase)
                         env_theta = env.theta
 
                         phi, w0_bar, Sigma_e = sess.run([QNet.phi, QNet.w0_bar, QNet.Sigma_e], feed_dict={QNet.state: env_state.reshape(-1,1),
@@ -524,6 +531,14 @@ with tf.Session() as sess:
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
 
+        if episode == 10000:
+            train_cov = 1
+
+            gradBuffer = sess.run(tf.trainable_variables())  # get shapes of tensors
+
+            for idx in range(len(gradBuffer)):
+                gradBuffer[idx] *= 0
+
 
         # Gradient descent
         for e in range(batch_size):
@@ -570,11 +585,13 @@ with tf.Session() as sess:
                                                            QNet.state: state_valid, QNet.action: action_valid,
                                                            QNet.reward: reward_valid, QNet.state_next: next_state_valid,
                                                            QNet.lr_placeholder: learning_rate,
-                                                           QNet.nprec: noise_precision})
+                                                           QNet.nprec: noise_precision, QNet.train_cov: train_cov})
 
 
             for idx, grad in enumerate(grads): # grad[0] is gradient and grad[1] the variable itself
                 gradBuffer[idx] += (grad[0]/ batch_size)
+
+            gradBuffer[-1]*= (1.- np.exp(-episode/10000.))
 
             lossBuffer += loss
             loss0Buffer += loss0
@@ -583,7 +600,7 @@ with tf.Session() as sess:
 
         # update summary
         feed_dict= dictionary = dict(zip(QNet.gradient_holders, gradBuffer))
-        feed_dict.update({QNet.lr_placeholder: learning_rate})
+        feed_dict.update({QNet.lr_placeholder: learning_rate, QNet.train_cov: train_cov})
         _, summaries_merged = sess.run([QNet.updateModel, QNet.summaries_merged], feed_dict=feed_dict)
 
         loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss', simple_value=(lossBuffer / batch_size))])
@@ -638,11 +655,11 @@ with tf.Session() as sess:
 
             # plot w* phi
             env_state = np.linspace(0, 1, 100)
-            env_psi = env._psi(env_state)
+            env_psi = env._psi(env_state, np.pi/2.* np.ones([3]))
             env_mu = env.mu
 
             w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
-                                                feed_dict={QNet.state: env_state.reshape(-1,1), QNet.nprec: noise_precision})
+                                                feed_dict={QNet.state: env_state.reshape(-1,1), QNet.nprec: noise_precision, QNet.train_cov: train_cov})
 
             #np.set_printoptions(suppress=True)
             #print('w0_bar: '+ str(np.round(w0_bar.reshape(1, -1), 2))+ ',  L0: '+ str(np.round(L0.reshape(1, -1), 2)))
