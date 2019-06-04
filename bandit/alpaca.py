@@ -19,27 +19,32 @@ np.random.seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 1, "Dimensionality of action space")
+tf.flags.DEFINE_integer("action_space", 2, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 1, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of hidden space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.0001, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5.0, "Maximum noise precision (1/var)")
-tf.flags.DEFINE_integer("noise_Ndrop", 1500, "Noise precision (1/var)")
+tf.flags.DEFINE_integer("noise_Ndrop", 1500, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.5, "Step of noise precision s*=ds")
+
+tf.flags.DEFINE_integer("split_N", 2000, "Increase split ratio every N steps")
+tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
 
 tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 20, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
-tf.flags.DEFINE_integer("update_freq", 2, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_string('non_linearity', 'tanh', 'Non-linearity used in encoder.')
+tf.flags.DEFINE_string('non_linearity', 'tanh', 'Non-linearity used in encoder')
+
+tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the first N iterations')
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
@@ -66,10 +71,11 @@ class QNetwork():
             hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
             hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
             hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
+            hidden4 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None)
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
             # needs to be done this manner due to the way tf reshapes arrays
-            hidden3_rs = tf.reshape(hidden3, [-1, self.action_dim, self.latent_dim])
+            hidden3_rs = tf.reshape(hidden4, [-1, self.action_dim, self.latent_dim])
             hidden3_rs = tf.transpose(hidden3_rs, [0, 2, 1])
 
         return hidden3_rs
@@ -148,8 +154,9 @@ class QNetwork():
 
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
-        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec)*tf.eye(self.latent_dim)) # cholesky
-        self.L0 = tf.matmul(self.L0_asym, tf.transpose(self.L0_asym))  # \Lambda_0
+        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec)*tf.ones(self.latent_dim)) # cholesky
+        L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
+        self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
         self.sample_prior = self._sample_prior()
 
@@ -204,7 +211,10 @@ class QNetwork():
         self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
         self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
         self.loss2 = logdet_Sigma
-        self.loss = self.loss1+ self.loss2 #tf.losses.mean_squared_error(self.Qtarget, self.Q)
+        self.loss3 = tf.linalg.logdet(self.Lt_inv)+ tf.linalg.logdet(self.L0)+\
+                     tf.linalg.trace(tf.matmul(tf.linalg.inv(self.Lt_inv), tf.linalg.inv(self.L0)))+\
+                     tf.matmul(tf.matmul(tf.linalg.transpose((self.wt_bar- self.w0_bar)), tf.linalg.inv(self.Lt_inv)),(self.wt_bar- self.w0_bar))
+        self.loss = self.loss1+ self.loss2#+ 1.* self.loss3 #tf.losses.mean_squared_error(self.Qtarget, self.Q)
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
@@ -325,6 +335,7 @@ def eGreedyAction(x, epsilon=0.9):
 batch_size = FLAGS.batch_size
 eps = 0.
 train_cov = 0
+split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
 log = logging.getLogger('Train')
@@ -400,10 +411,11 @@ with tf.Session() as sess:
 
 
     # loss buffers to visualize in tensorboard
-    lossBuffer = 0
-    loss0Buffer = 0
-    loss1Buffer = 0
-    loss2Buffer = 0
+    lossBuffer = 0.
+    loss0Buffer = 0.
+    loss1Buffer = 0.
+    loss2Buffer = 0.
+    loss3Buffer = 0.
 
     # -----------------------------------------------------------------------------------
     # loop episodes
@@ -449,7 +461,7 @@ with tf.Session() as sess:
 
                 # update posterior
                 # TODO: could speed up by iteratively adding
-                if step % FLAGS.update_freq == 0 and step != 0:
+                if (step+1) % FLAGS.update_freq == 0:
                     reward_train = np.zeros([step+1, ])
                     state_train = np.zeros([step+1, FLAGS.state_space])
                     next_state_train = np.zeros([step+1, FLAGS.state_space])
@@ -473,7 +485,7 @@ with tf.Session() as sess:
                                         QNet.nprec: noise_precision, QNet.train_cov: train_cov})
 
                     # plot
-                    if episode % 1000 == 0 and n == 0:
+                    if episode % 3000 == 0 and n == 0:
 
                         # plot w* phi
                         env_state = np.linspace(0, 1, 100)
@@ -496,11 +508,11 @@ with tf.Session() as sess:
 
                             delta = np.where(action_train == act) # to visualize which action network took
 
-                            ax.plot(env_state, env_r, 'r')
-                            ax.plot(env_state, Q_r, 'b')
-                            ax.plot(env_state, Q0, 'b--')
-                            ax.scatter(state_train[delta], reward_train[delta], marker='x', color='r')
-                            ax.fill_between(env_state, Q_r - dQ_r, Q_r + dQ_r, alpha=0.5)
+                            ax[act].plot(env_state, env_r, 'r')
+                            ax[act].plot(env_state, Q_r, 'b')
+                            ax[act].plot(env_state, Q0, 'b--')
+                            ax[act].scatter(state_train[delta], reward_train[delta], marker='x', color='r')
+                            ax[act].fill_between(env_state, Q_r - dQ_r, Q_r + dQ_r, alpha=0.5)
 
 
                         plt.savefig(rt_dir + 'Epoch_' + str(episode)+ '_step_'+ str(step) + '_Reward')
@@ -530,7 +542,7 @@ with tf.Session() as sess:
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
 
-        if episode == 10000:
+        if episode == FLAGS.stop_grad:
             train_cov = 1
 
             gradBuffer = sess.run(tf.trainable_variables())  # get shapes of tensors
@@ -538,6 +550,8 @@ with tf.Session() as sess:
             for idx in range(len(gradBuffer)):
                 gradBuffer[idx] *= 0
 
+        if episode % FLAGS.split_N == 0 and episode > 0:
+            split_ratio += 0.1
 
         # Gradient descent
         for e in range(batch_size):
@@ -560,7 +574,7 @@ with tf.Session() as sess:
                 done_sample[k] = d
 
             # split into context and prediction set
-            split = np.int(0.7* FLAGS.L_episode* np.random.rand())
+            split = np.min([np.int(split_ratio* FLAGS.L_episode* np.random.rand()), FLAGS.L_episode])
 
             train = np.arange(0, split)
             valid = np.arange(split, FLAGS.L_episode)
@@ -578,7 +592,7 @@ with tf.Session() as sess:
             done_valid = done_sample[valid]
 
             # update model
-            grads, loss0, loss1, loss2, loss = sess.run([QNet.gradients, QNet.loss0, QNet.loss1, QNet.loss2, QNet.loss],
+            grads, loss0, loss1, loss2, loss3, loss = sess.run([QNet.gradients, QNet.loss0, QNet.loss1, QNet.loss2, QNet.loss3, QNet.loss],
                                                 feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                                                            QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                                            QNet.state: state_valid, QNet.action: action_valid,
@@ -594,6 +608,7 @@ with tf.Session() as sess:
             loss0Buffer += loss0
             loss1Buffer += loss1
             loss2Buffer += loss2
+            loss3Buffer += loss3
 
         # update summary
         feed_dict= dictionary = dict(zip(QNet.gradient_holders, gradBuffer))
@@ -604,6 +619,7 @@ with tf.Session() as sess:
         loss0_summary = tf.Summary(value=[tf.Summary.Value(tag='TD_Loss', simple_value=(loss0Buffer / batch_size))])
         loss1_summary = tf.Summary(value=[tf.Summary.Value(tag='TDW_Loss', simple_value=(loss1Buffer/ batch_size))])
         loss2_summary = tf.Summary(value=[tf.Summary.Value(tag='Sig_Loss', simple_value=(loss2Buffer / batch_size))])
+        loss3_summary = tf.Summary(value=[tf.Summary.Value(tag='KL_Loss', simple_value=(loss3Buffer / batch_size))])
         reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw)))])
 
         learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
@@ -612,6 +628,7 @@ with tf.Session() as sess:
         summary_writer.add_summary(loss0_summary, episode)
         summary_writer.add_summary(loss1_summary, episode)
         summary_writer.add_summary(loss2_summary, episode)
+        summary_writer.add_summary(loss3_summary, episode)
         summary_writer.add_summary(reward_summary, episode)
         summary_writer.add_summary(summaries_merged, episode)
         summary_writer.add_summary(learning_rate_summary, episode)
@@ -625,10 +642,11 @@ with tf.Session() as sess:
 
         summary_writer.flush()
 
-        lossBuffer *= 0
-        loss0Buffer *= 0
-        loss1Buffer *= 0
-        loss2Buffer *= 0
+        lossBuffer *= 0.
+        loss0Buffer *= 0.
+        loss1Buffer *= 0.
+        loss2Buffer *= 0.
+        loss3Buffer *= 0.
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
         if episode < 2:
@@ -646,13 +664,13 @@ with tf.Session() as sess:
 
         # ================================================================
         # print to console
-        if episode % 500 == 0:
+        if episode % 2000 == 0:
             print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
             print('Learning_rate: '+ str(np.round(learning_rate,5))+ ', Nprec: '+ str(noise_precision))
 
             # plot w* phi
             env_state = np.linspace(0, 1, 100)
-            env_psi = env._psi(env_state, np.pi/4.)
+            env_psi = env._psi(env_state, np.pi/2.* np.ones(2))
             env_mu = env.mu
 
             w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
@@ -670,9 +688,9 @@ with tf.Session() as sess:
                 Q_r = np.dot(phi[:, :, act], w0_bar[:, 0])
                 dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])+ Sigma_e
 
-                ax.plot(env_state, env_r, 'r')
-                ax.plot(env_state, Q_r, 'b')
-                ax.fill_between(env_state, Q_r- dQ_r, Q_r+ dQ_r, alpha=0.5)
+                ax[act].plot(env_state, env_r, 'r')
+                ax[act].plot(env_state, Q_r, 'b')
+                ax[act].fill_between(env_state, Q_r- dQ_r, Q_r+ dQ_r, alpha=0.5)
 
             plt.savefig(r0_dir+'Epoch_'+str(episode)+'_Reward')
             plt.close()
