@@ -19,10 +19,10 @@ np.random.seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 2, "Dimensionality of action space")
+tf.flags.DEFINE_integer("action_space", 1, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 1, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("latent_space", 32, "Dimensionality of hidden space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
@@ -38,11 +38,12 @@ tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
 
 tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 20, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 15, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_string('non_linearity', 'tanh', 'Non-linearity used in encoder')
+tf.flags.DEFINE_integer("save_frequency", 100, "Store images every N-th episode")
+tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the first N iterations')
 
@@ -68,10 +69,17 @@ class QNetwork():
         ''' Embedding into latent space '''
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
-            hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
-            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.tanh)
-            hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=tf.nn.tanh)
-            hidden4 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None)
+            hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.sigmoid,
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(0.01))
+            hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.sigmoid,
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(0.01))
+            hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=tf.nn.sigmoid,
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(0.01))
+            # probably inject action here or even one layer before
+            # action_augm is already in the correct shape, only need to one-hot encode it
+            # tf.concat to correct dimension [batch_size* action_dim, latent_dim]
+            hidden4 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(0.01))
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
             # needs to be done this manner due to the way tf reshapes arrays
@@ -214,7 +222,8 @@ class QNetwork():
         self.loss3 = tf.linalg.logdet(self.Lt_inv)+ tf.linalg.logdet(self.L0)+\
                      tf.linalg.trace(tf.matmul(tf.linalg.inv(self.Lt_inv), tf.linalg.inv(self.L0)))+\
                      tf.matmul(tf.matmul(tf.linalg.transpose((self.wt_bar- self.w0_bar)), tf.linalg.inv(self.Lt_inv)),(self.wt_bar- self.w0_bar))
-        self.loss = self.loss1+ self.loss2#+ 1.* self.loss3 #tf.losses.mean_squared_error(self.Qtarget, self.Q)
+        self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
+        self.loss = self.loss1+ self.loss2#+ 100.*self.lr_placeholder* self.loss3
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
@@ -381,7 +390,7 @@ log.info('Build Tensorflow Graph')
 QNet = QNetwork() # neural network
 
 # initialize environment
-env = bandit_environment()
+env = bandit_environment(FLAGS.action_space)
 
 with tf.Session() as sess:
     # set random seed
@@ -485,7 +494,7 @@ with tf.Session() as sess:
                                         QNet.nprec: noise_precision, QNet.train_cov: train_cov})
 
                     # plot
-                    if episode % 3000 == 0 and n == 0:
+                    if episode % FLAGS.save_frequency == 0 and n == 0:
 
                         # plot w* phi
                         env_state = np.linspace(0, 1, 100)
@@ -508,12 +517,18 @@ with tf.Session() as sess:
 
                             delta = np.where(action_train == act) # to visualize which action network took
 
-                            ax[act].plot(env_state, env_r, 'r')
-                            ax[act].plot(env_state, Q_r, 'b')
-                            ax[act].plot(env_state, Q0, 'b--')
-                            ax[act].scatter(state_train[delta], reward_train[delta], marker='x', color='r')
-                            ax[act].fill_between(env_state, Q_r - dQ_r, Q_r + dQ_r, alpha=0.5)
-
+                            if FLAGS.action_space > 1:
+                                ax[act].plot(env_state, env_r, 'r')
+                                ax[act].plot(env_state, Q_r, 'b')
+                                ax[act].plot(env_state, Q0, 'b--')
+                                ax[act].scatter(state_train[delta], reward_train[delta], marker='x', color='r')
+                                ax[act].fill_between(env_state, Q_r - 1.96*dQ_r, Q_r + 1.96*dQ_r, alpha=0.5)
+                            else:
+                                ax.plot(env_state, env_r, 'r')
+                                ax.plot(env_state, Q_r, 'b')
+                                ax.plot(env_state, Q0, 'b--')
+                                ax.scatter(state_train[delta], reward_train[delta], marker='x', color='r')
+                                ax.fill_between(env_state, Q_r - 1.96*dQ_r, Q_r + 1.96*dQ_r, alpha=0.5)
 
                         plt.savefig(rt_dir + 'Epoch_' + str(episode)+ '_step_'+ str(step) + '_Reward')
                         plt.close()
@@ -664,13 +679,13 @@ with tf.Session() as sess:
 
         # ================================================================
         # print to console
-        if episode % 2000 == 0:
+        if episode % FLAGS.save_frequency == 0:
             print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
             print('Learning_rate: '+ str(np.round(learning_rate,5))+ ', Nprec: '+ str(noise_precision))
 
             # plot w* phi
             env_state = np.linspace(0, 1, 100)
-            env_psi = env._psi(env_state, np.pi/2.* np.ones(2))
+            env_psi = env._psi(env_state, np.pi/2.* np.ones(FLAGS.action_space))
             env_mu = env.mu
 
             w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
@@ -688,14 +703,18 @@ with tf.Session() as sess:
                 Q_r = np.dot(phi[:, :, act], w0_bar[:, 0])
                 dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])+ Sigma_e
 
-                ax[act].plot(env_state, env_r, 'r')
-                ax[act].plot(env_state, Q_r, 'b')
-                ax[act].fill_between(env_state, Q_r- dQ_r, Q_r+ dQ_r, alpha=0.5)
+                if FLAGS.action_space > 1:
+                    ax[act].plot(env_state, env_r, 'r')
+                    ax[act].plot(env_state, Q_r, 'b')
+                    ax[act].fill_between(env_state, Q_r- 1.96*dQ_r, Q_r+ 1.96*dQ_r, alpha=0.5)
+                else:
+                    ax.plot(env_state, env_r, 'r')
+                    ax.plot(env_state, Q_r, 'b')
+                    ax.fill_between(env_state, Q_r - 1.96*dQ_r, Q_r + 1.96*dQ_r, alpha=0.5)
 
             plt.savefig(r0_dir+'Epoch_'+str(episode)+'_Reward')
             plt.close()
 
-        if episode % 1000 == 0:
             log.info('Episode %3.d with time per episode %5.2f', episode, (time.time()- start))
 
 
