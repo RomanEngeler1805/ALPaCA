@@ -108,6 +108,11 @@ class QNetwork():
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
         self.train_cov = tf.placeholder(tf.int32, shape=())
 
+        # for kl divergence to change learning dynamics
+        self.w0_bar_old = tf.placeholder(tf.float32, shape=[self.latent_dim, 1], name='w0_bar_old')
+        self.L0_asym_old = tf.placeholder(tf.float32, shape=[self.latent_dim], name='L0_asym_old')
+        self.L0_old = tf.matmul(tf.diag(self.L0_asym_old), tf.diag(self.L0_asym_old))  # \Lambda_0
+
         # placeholders ====================================================================
         ## context data
         self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
@@ -220,11 +225,13 @@ class QNetwork():
         self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
         self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
         self.loss2 = logdet_Sigma
-        self.loss3 = tf.linalg.logdet(self.Lt_inv)+ tf.linalg.logdet(self.L0)+\
-                     tf.linalg.trace(tf.matmul(tf.linalg.inv(self.Lt_inv), tf.linalg.inv(self.L0)))+\
-                     tf.matmul(tf.matmul(tf.linalg.transpose((self.wt_bar- self.w0_bar)), tf.linalg.inv(self.Lt_inv)),(self.wt_bar- self.w0_bar))
+        self.loss3 = -tf.linalg.logdet(self.L0)+ tf.linalg.logdet(self.L0_old)+\
+                     tf.linalg.trace(tf.matmul(self.L0, tf.linalg.inv(self.L0_old)))+\
+                     tf.matmul(tf.matmul(tf.linalg.transpose((self.w0_bar_old- self.w0_bar)), self.L0),(self.w0_bar_old- self.w0_bar))
+
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
-        self.loss = self.loss1+ self.loss2#+ 100.*self.lr_placeholder* self.loss3
+
+        self.loss = self.loss1+ self.loss2+ self.loss3
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
@@ -400,6 +407,14 @@ with tf.Session() as sess:
     # session
     init = tf.global_variables_initializer()
     sess.run(init)
+
+    # DKL with old values (limit rate of change)
+    w0_bar_old = np.zeros([2, FLAGS.latent_space, 1])
+    L0_asym_old = np.zeros([2, FLAGS.latent_space])
+
+    w0_bar_old[0], L0_asym_old[0] = sess.run([QNet.w0_bar, QNet.L0_asym])
+    w0_bar_old[1] = w0_bar_old[0]
+    L0_asym_old[1] = L0_asym_old[0]
 
     # checkpoint and summaries
     log.info('Save model snapshot')
@@ -667,6 +682,12 @@ with tf.Session() as sess:
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
         if episode < 2:
             batch_size *= 2
+
+        if episode % 500 == 0:
+            w0_bar_old[0] = w0_bar_old[1]
+            L0_asym_old[0] = L0_asym_old[1]
+
+            w0_bar_old[1], L0_asym_old[1] = sess.run([QNet.w0_bar, QNet.L0_asym])
 
         # ===============================================================
         # save model
