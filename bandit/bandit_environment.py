@@ -18,7 +18,7 @@ class bandit_environment():
         self.mu = 3. * np.ones([self.n_dim])
 
         # draw new amplitude
-        self.theta = 0.1+ 4.9* np.random.rand()# self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
+        self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
 
         # draw new phase
         self.phase = np.random.rand(self.action_dim)* np.pi/ 1.
@@ -28,7 +28,7 @@ class bandit_environment():
 
     def _sample_env(self):
         ''' resample theta '''
-        self.theta = 0.1+ 4.9* np.random.rand()# self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
+        self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
         self.phase = np.random.rand(self.action_dim)* np.pi/ 1.
 
     def _sample_state(self):

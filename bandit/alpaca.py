@@ -42,7 +42,8 @@ tf.flags.DEFINE_integer("L_episode", 15, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 100, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 3000, "Store images every N-th episode")
+tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the first N iterations')
@@ -70,16 +71,16 @@ class QNetwork():
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
             hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=tf.nn.sigmoid,
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(0.01))
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer),)
             hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=tf.nn.sigmoid,
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(0.01))
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=tf.nn.sigmoid,
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(0.01))
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             # probably inject action here or even one layer before
             # action_augm is already in the correct shape, only need to one-hot encode it
             # tf.concat to correct dimension [batch_size* action_dim, latent_dim]
             hidden4 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(0.01))
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
             # needs to be done this manner due to the way tf reshapes arrays
