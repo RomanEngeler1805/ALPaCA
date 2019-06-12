@@ -18,6 +18,7 @@ sys.path.insert(0, './..')
 from replay_buffer import replay_buffer
 
 np.random.seed(1234)
+tf.random.set_random_seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
@@ -28,7 +29,7 @@ tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
-tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
+tf.flags.DEFINE_float("prior_precision", 1000, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5.0, "Maximum noise precision (1/var)")
@@ -48,8 +49,9 @@ tf.flags.DEFINE_integer("L_episode", 15, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 3000, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.1, "Regularization parameter")
+tf.flags.DEFINE_float("rate", 0.1, "Dropout rate (1- keep_prob)")
 tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the first N iterations')
@@ -87,25 +89,33 @@ class QNetwork():
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
             hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=self.activation,
+                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer),)
             hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=self.activation,
+                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=self.activation,
+                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
+
+
+            hidden3 = tf.nn.dropout(hidden3, rate=FLAGS.rate)
+
             # probably inject action here or even one layer before
             # action_augm is already in the correct shape, only need to one-hot encode it
             # tf.concat to correct dimension [batch_size* action_dim, latent_dim]
             # hidden3 = tf.concat([hidden3, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             hidden4 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
+                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
             # needs to be done this manner due to the way tf reshapes arrays
-            hidden3_rs = tf.reshape(hidden4, [-1, self.action_dim, self.latent_dim])
-            hidden3_rs = tf.transpose(hidden3_rs, [0, 2, 1])
+            hidden4_rs = tf.reshape(hidden4, [-1, self.action_dim, self.latent_dim])
+            hidden4_rs = tf.transpose(hidden4_rs, [0, 2, 1])
 
-        return hidden3_rs
+        return hidden4_rs
 
     def state_trafo(self, state, action):
         ''' append action to the state '''
@@ -243,10 +253,11 @@ class QNetwork():
                      tf.matmul(tf.matmul(tf.linalg.transpose((self.w0_bar_old- self.w0_bar)), self.L0),(self.w0_bar_old- self.w0_bar))-\
                      self.latent_dim
 
+        self.loss_reg = tf.losses.get_regularization_loss()
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss1+ self.loss2+ tf.losses.get_regularization_loss(scope="latent")
+        self.loss = self.loss1+ self.loss2#+ self.loss_reg
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
@@ -415,8 +426,6 @@ QNet = QNetwork() # neural network
 env = bandit_environment(FLAGS.action_space)
 
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
-    # set random seed
-    tf.set_random_seed(1234)
 
     # session
     init = tf.global_variables_initializer()
@@ -455,6 +464,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     loss1Buffer = 0.
     loss2Buffer = 0.
     loss3Buffer = 0.
+
+    lossregBuffer = 0.
 
     # -----------------------------------------------------------------------------------
     # loop episodes
@@ -626,7 +637,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             done_valid = done_sample[valid]
 
             # update model
-            grads, loss0, loss1, loss2, loss3, loss = sess.run([QNet.gradients, QNet.loss0, QNet.loss1, QNet.loss2, QNet.loss3, QNet.loss],
+            grads, loss0, loss1, loss2, loss3, loss_reg, loss = sess.run([QNet.gradients, QNet.loss0, QNet.loss1,
+                                                                          QNet.loss2, QNet.loss3, QNet.loss_reg, QNet.loss],
                                                 feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                                                            QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                                            QNet.state: state_valid, QNet.action: action_valid,
@@ -644,31 +656,36 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             loss1Buffer += loss1
             loss2Buffer += loss2
             loss3Buffer += loss3
+            lossregBuffer += loss_reg
 
         # update summary
         feed_dict= dictionary = dict(zip(QNet.gradient_holders, gradBuffer))
         feed_dict.update({QNet.lr_placeholder: learning_rate})
         _, summaries_merged = sess.run([QNet.updateModel, QNet.summaries_merged], feed_dict=feed_dict)
 
-        loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss', simple_value=(lossBuffer / batch_size))])
-        loss0_summary = tf.Summary(value=[tf.Summary.Value(tag='TD_Loss', simple_value=(loss0Buffer / batch_size))])
-        loss1_summary = tf.Summary(value=[tf.Summary.Value(tag='TDW_Loss', simple_value=(loss1Buffer/ batch_size))])
-        loss2_summary = tf.Summary(value=[tf.Summary.Value(tag='Sig_Loss', simple_value=(loss2Buffer / batch_size))])
-        loss3_summary = tf.Summary(value=[tf.Summary.Value(tag='KL_Loss', simple_value=(loss3Buffer / batch_size))])
-        reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw)))])
+        # reduce summary size
+        if episode % 10 == 0:
+            loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss', simple_value=(lossBuffer / batch_size))])
+            loss0_summary = tf.Summary(value=[tf.Summary.Value(tag='TD_Loss', simple_value=(loss0Buffer / batch_size))])
+            loss1_summary = tf.Summary(value=[tf.Summary.Value(tag='TDW_Loss', simple_value=(loss1Buffer/ batch_size))])
+            loss2_summary = tf.Summary(value=[tf.Summary.Value(tag='Sig_Loss', simple_value=(loss2Buffer / batch_size))])
+            loss3_summary = tf.Summary(value=[tf.Summary.Value(tag='KL_Loss', simple_value=(loss3Buffer / batch_size))])
+            lossreg_summary = tf.Summary(value=[tf.Summary.Value(tag='Regularization_Loss', simple_value=(lossregBuffer / batch_size))])
+            reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw)))])
 
-        learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
+            learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
 
-        summary_writer.add_summary(loss_summary, episode)
-        summary_writer.add_summary(loss0_summary, episode)
-        summary_writer.add_summary(loss1_summary, episode)
-        summary_writer.add_summary(loss2_summary, episode)
-        summary_writer.add_summary(loss3_summary, episode)
-        summary_writer.add_summary(reward_summary, episode)
-        summary_writer.add_summary(summaries_merged, episode)
-        summary_writer.add_summary(learning_rate_summary, episode)
+            summary_writer.add_summary(loss_summary, episode)
+            summary_writer.add_summary(loss0_summary, episode)
+            summary_writer.add_summary(loss1_summary, episode)
+            summary_writer.add_summary(loss2_summary, episode)
+            summary_writer.add_summary(loss3_summary, episode)
+            summary_writer.add_summary(lossreg_summary, episode)
+            summary_writer.add_summary(reward_summary, episode)
+            summary_writer.add_summary(summaries_merged, episode)
+            summary_writer.add_summary(learning_rate_summary, episode)
 
-        summary_writer.flush()
+            summary_writer.flush()
 
         # reset buffers
         for idx in range(len(gradBuffer)):
@@ -682,6 +699,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         loss1Buffer *= 0.
         loss2Buffer *= 0.
         loss3Buffer *= 0.
+        lossregBuffer *= 0.
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
         if episode < 2:
