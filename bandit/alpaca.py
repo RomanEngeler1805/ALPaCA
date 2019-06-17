@@ -108,41 +108,31 @@ class QNetwork():
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             hidden3 = self.activation(self.hidden3)
 
-            #hidden3 = tf.concat([hidden3, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
-
-            self.hidden4 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.hidden_dim, activation_fn=None,
-                                                             weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                             weights_regularizer=tf.contrib.layers.l2_regularizer(
-                                                                 FLAGS.regularizer))
-            hidden4 = self.activation(self.hidden4)
-
-            #hidden4_rs = tf.reshape(hidden4, [-1, self.action_dim, self.hidden_dim])
-            #hidden4_rs = tf.transpose(hidden4_rs, [0, 2, 1])
-
-            hidden4_rs = tf.tile(tf.reshape(hidden4, [-1, self.hidden_dim, 1]), [1, 1, self.action_dim])
-
-            self.hidden5_W = tf.get_variable('hidden5_W', dtype=tf.float32, shape=[self.hidden_dim, self.latent_dim, self.action_dim])
-
-            hidden5 = tf.einsum('bha,hla->bla', hidden4_rs, self.hidden5_W)
-
-
-            # hidden3 = tf.nn.dropout(hidden3, rate=rate)
-
             # probably inject action here or even one layer before
             # action_augm is already in the correct shape, only need to one-hot encode it
             # tf.concat to correct dimension [batch_size* action_dim, latent_dim]
-            # hidden3 = tf.concat([hidden3, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+            hidden3 = tf.concat([hidden3, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
-            #hidden5 = tf.contrib.layers.fully_connected(hidden4, num_outputs=self.latent_dim, activation_fn=None,
-            #                                            weights_initializer=tf.contrib.layers.xavier_initializer(),
-            #                                            weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
+            self.hidden4 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.hidden_dim, activation_fn=None,
+                                                             weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                                             weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
+            hidden4 = self.activation(self.hidden4)
+
+            # multiple heads
+            #hidden4_rs = tf.tile(tf.reshape(hidden4, [-1, self.hidden_dim, 1]), [1, 1, self.action_dim])
+            #self.hidden5_W = tf.get_variable('hidden5_W', dtype=tf.float32, shape=[self.hidden_dim, self.latent_dim, self.action_dim])
+            #hidden5 = tf.einsum('bha,hla->bla', hidden4_rs, self.hidden5_W)
+
+            # single head
+            hidden5 = tf.contrib.layers.fully_connected(hidden4, num_outputs=self.latent_dim, activation_fn=None,
+                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
-            # needs to be done this manner due to the way tf reshapes arrays
-            #hidden5_rs = tf.reshape(hidden5, [-1, self.action_dim, self.latent_dim])
-            #hidden5_rs = tf.transpose(hidden5_rs, [0, 2, 1])
+            hidden5_rs = tf.reshape(hidden5, [-1, self.action_dim, self.latent_dim])
+            hidden5_rs = tf.transpose(hidden5_rs, [0, 2, 1])
 
-        return hidden5
+        return hidden5_rs
 
     def state_trafo(self, state, action):
         ''' append action to the state '''
@@ -183,8 +173,8 @@ class QNetwork():
         context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
 
         # latent representation
-        self.context_phi = self.model(self.context_state, context_action_augm)  # latent space
-        self.context_phi_next = self.model(self.context_state_next, context_action_augm)  # latent space
+        self.context_phi = self.model(context_state, context_action_augm)  # latent space
+        self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
 
         self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.context_done = tf.placeholder(shape=[None, 1], dtype=tf.float32, name='done')
@@ -204,8 +194,8 @@ class QNetwork():
         state_next = self.state_trafo(self.state_next, action_augm)
 
         # latent representation
-        self.phi = self.model(self.state, action_augm) # latent space
-        self.phi_next = self.model(self.state_next, action_augm)  # latent space
+        self.phi = self.model(state, action_augm) # latent space
+        self.phi_next = self.model(state_next, action_augm)  # latent space
 
         self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
@@ -280,7 +270,7 @@ class QNetwork():
                      tf.linalg.trace(tf.matmul(self.L0, tf.linalg.inv(self.L0_old)))+\
                      tf.matmul(tf.matmul(tf.linalg.transpose((self.w0_bar_old- self.w0_bar)), self.L0),(self.w0_bar_old- self.w0_bar))
 
-        self.loss_reg = tf.losses.get_regularization_loss()+ tf.nn.l2_loss(self.hidden5_W)#+\
+        self.loss_reg = tf.losses.get_regularization_loss()#+ tf.nn.l2_loss(self.hidden5_W)+\
                         #tf.nn.l2_loss(self.w0_bar)+ tf.nn.l2_loss(self.L0)
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
