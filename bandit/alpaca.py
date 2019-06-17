@@ -8,6 +8,7 @@ import os
 import time
 import logging
 import matplotlib.pyplot as plt
+from matplotlib.pyplot import cm
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
@@ -50,7 +51,7 @@ tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
-tf.flags.DEFINE_float("regularizer", 0.001, "Regularization parameter")
+tf.flags.DEFINE_float("regularizer", 0.1, "Regularization parameter")
 tf.flags.DEFINE_float("rate", 0.0, "Dropout rate (1- keep_prob)")
 tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
 
@@ -115,12 +116,14 @@ class QNetwork():
                                                                  FLAGS.regularizer))
             hidden4 = self.activation(self.hidden4)
 
-            hidden4_rs = tf.reshape(hidden4, [-1, self.action_dim, self.hidden_dim])
-            hidden4_rs = tf.transpose(hidden4_rs, [0, 2, 1])
+            #hidden4_rs = tf.reshape(hidden4, [-1, self.action_dim, self.hidden_dim])
+            #hidden4_rs = tf.transpose(hidden4_rs, [0, 2, 1])
 
-            hidden5_W = tf.get_variable('hidden5_W', dtype=tf.float32, shape=[self.hidden_dim, self.latent_dim, self.action_dim])
+            hidden4_rs = tf.tile(tf.reshape(hidden4, [-1, self.hidden_dim, 1]), [1, 1, self.action_dim])
 
-            hidden5 = tf.einsum('bha,hla->bla', hidden4_rs, hidden5_W)
+            self.hidden5_W = tf.get_variable('hidden5_W', dtype=tf.float32, shape=[self.hidden_dim, self.latent_dim, self.action_dim])
+
+            hidden5 = tf.einsum('bha,hla->bla', hidden4_rs, self.hidden5_W)
 
 
             # hidden3 = tf.nn.dropout(hidden3, rate=rate)
@@ -180,8 +183,8 @@ class QNetwork():
         context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
 
         # latent representation
-        self.context_phi = self.model(context_state, context_action_augm)  # latent space
-        self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
+        self.context_phi = self.model(self.context_state, context_action_augm)  # latent space
+        self.context_phi_next = self.model(self.context_state_next, context_action_augm)  # latent space
 
         self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.context_done = tf.placeholder(shape=[None, 1], dtype=tf.float32, name='done')
@@ -201,8 +204,8 @@ class QNetwork():
         state_next = self.state_trafo(self.state_next, action_augm)
 
         # latent representation
-        self.phi = self.model(state, action_augm) # latent space
-        self.phi_next = self.model(state_next, action_augm)  # latent space
+        self.phi = self.model(self.state, action_augm) # latent space
+        self.phi_next = self.model(self.state_next, action_augm)  # latent space
 
         self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
@@ -277,7 +280,8 @@ class QNetwork():
                      tf.linalg.trace(tf.matmul(self.L0, tf.linalg.inv(self.L0_old)))+\
                      tf.matmul(tf.matmul(tf.linalg.transpose((self.w0_bar_old- self.w0_bar)), self.L0),(self.w0_bar_old- self.w0_bar))
 
-        self.loss_reg = tf.losses.get_regularization_loss()
+        self.loss_reg = tf.losses.get_regularization_loss()+ tf.nn.l2_loss(self.hidden5_W)#+\
+                        #tf.nn.l2_loss(self.w0_bar)+ tf.nn.l2_loss(self.L0)
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
@@ -442,6 +446,11 @@ if not os.path.exists(rt_dir):
 r0_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/r0/'
 if not os.path.exists(r0_dir):
     os.makedirs(r0_dir)
+
+basis_fcn_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/basis_fcn/'
+if not os.path.exists(basis_fcn_dir):
+    os.makedirs(basis_fcn_dir)
+
 
 # initialize replay memory and model
 fullbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
@@ -625,7 +634,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio += 0.1
+            split_ratio = np.min([split_ratio+ 0.1, 0.7])
 
         # Gradient descent
         for e in range(batch_size):
@@ -648,7 +657,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 done_sample[k] = d
 
             # split into context and prediction set
-            split = np.min([np.int(split_ratio* FLAGS.L_episode* np.random.rand()), FLAGS.L_episode])
+            split = np.int(split_ratio* FLAGS.L_episode* np.random.rand())
 
             train = np.arange(0, split)
             valid = np.arange(split, FLAGS.L_episode)
@@ -679,10 +688,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             for idx, grad in enumerate(grads): # grad[0] is gradient and grad[1] the variable itself
                 gradBuffer[idx] += (grad[0]/ batch_size)
-
-                if episode % 50 > 0 and idx >  9:
-                    gradBuffer[idx] *= 0
-
 
             lossBuffer += loss
             loss0Buffer += loss0
@@ -723,9 +728,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         # reset buffers
         for idx in range(len(gradBuffer)):
-            #grad_summary = tf.Summary(value=[tf.Summary.Value(tag='Hist'+ str(idx), values=gradBuffer[idx])])
-            #summary_writer.add_summary(grad_summary, episode)
-
             gradBuffer[idx] *= 0
 
         lossBuffer *= 0.
@@ -773,8 +775,14 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                                 feed_dict={QNet.state: env_state.reshape(-1,1),
                                                            QNet.nprec: noise_precision, QNet.rate_placeholder: 0.0})
 
-            #np.set_printoptions(suppress=True)
-            #print('w0_bar: '+ str(np.round(w0_bar.reshape(1, -1), 2))+ ',  L0: '+ str(np.round(L0.reshape(1, -1), 2)))
+            fig, ax = plt.subplots(figsize=[10,5])
+            color = iter(cm.rainbow(np.linspace(0, 1, phi.shape[1])))
+            for bf in range(phi.shape[1]):
+                ax.plot(phi[:, bf, 0], c=next(color))
+
+            plt.savefig(basis_fcn_dir + 'Epoch_' + str(episode))
+            plt.close()
+
 
             # plot prior
             fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20,5])
