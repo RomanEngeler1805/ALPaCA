@@ -1,6 +1,6 @@
 import numpy as np
 
-class bandit_environment():
+class wheel_bandit_environment():
     ''' contextual bandit '''
 
     def __init__(self, action_space):
@@ -14,7 +14,7 @@ class bandit_environment():
         self.action_dim = action_space
 
         # state
-        self.state = np.array([np.random.rand(self.n_dim)]) # [radius, phase]
+        self.state = np.random.rand(self.n_dim) # [radius, phase]
 
         # feature
         self.delta = np.random.rand()
@@ -27,20 +27,20 @@ class bandit_environment():
 
     def _sample_state(self):
         ''' resample state '''
-        self.state = np.array([np.random.rand(self.n_dim)]) # [radius, phase]
+        self.state = np.random.rand(self.n_dim) # [radius, phase]
         return self.state
 
-    def _mu_idx(self, state, phase):
-        ''' used to query environment '''
+    def _mu_idx(self, state):
+        ''' used to calculate reward '''
 
         if state[0] > self.delta:
             if  0<= state[1] and state[1] < 0.25:
                 mu_idx = np.array([0, 2, 1, 1, 1])
-            if 0.25 <= state[1] and state[1] < 0.25:
+            if 0.25 <= state[1] and state[1] < 0.50:
                 mu_idx = np.array([0, 1, 2, 1, 1])
             if 0.50 <= state[1] and state[1] < 0.75:
                 mu_idx = np.array([0, 1, 1, 2, 1])
-            if 0.75 <= state[1] and state[1] < 1.00:
+            if 0.75 <= state[1] and state[1] <= 1.00:
                 mu_idx = np.array([0, 1, 1, 1, 2])
         else:
             mu_idx = np.array([0, 1, 1, 1, 1])
@@ -59,7 +59,7 @@ class bandit_environment():
         d = 0
 
         # resample random data point
-        self._sample_state()
+        # self._sample_state()
 
         # observe (untransformed) state and reward
         obs = np.array([np.array([self.state[0]* np.cos(2.*np.pi* self.state[1]),
