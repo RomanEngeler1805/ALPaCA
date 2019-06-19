@@ -29,13 +29,13 @@ tf.flags.DEFINE_integer("state_space", 1, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
-tf.flags.DEFINE_float("learning_rate", 2e-3, "Initial learning rate")
+tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 
-tf.flags.DEFINE_float("noise_precision", 0.3, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.8, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5.0, "Maximum noise precision (1/var)")
-tf.flags.DEFINE_integer("noise_Ndrop", 1500, "Increase noise precision every N steps")
+tf.flags.DEFINE_integer("noise_Ndrop", 1000, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.5, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 1000, "Increase split ratio every N steps")
@@ -44,9 +44,9 @@ tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning"
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 20000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 20, "Length of episodes")
 
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
@@ -61,7 +61,7 @@ tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
 
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.38)
 
 class QNetwork():
     def __init__(self, scope="QNetwork"):
@@ -97,35 +97,21 @@ class QNetwork():
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
             self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
-                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer),)
             hidden1 = self.activation(self.hidden1)
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             hidden2 = self.activation(self.hidden2)
+            hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+
             self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             hidden3 = self.activation(self.hidden3)
 
-            # probably inject action here or even one layer before
-            # action_augm is already in the correct shape, only need to one-hot encode it
-            # tf.concat to correct dimension [batch_size* action_dim, latent_dim]
-            hidden3 = tf.concat([hidden3, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
-
-            self.hidden4 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.hidden_dim, activation_fn=None,
-                                                             weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                             weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
-            hidden4 = self.activation(self.hidden4)
-
-            # multiple heads
-            #hidden4_rs = tf.tile(tf.reshape(hidden4, [-1, self.hidden_dim, 1]), [1, 1, self.action_dim])
-            #self.hidden5_W = tf.get_variable('hidden5_W', dtype=tf.float32, shape=[self.hidden_dim, self.latent_dim, self.action_dim])
-            #hidden5 = tf.einsum('bha,hla->bla', hidden4_rs, self.hidden5_W)
-
             # single head
-            hidden5 = tf.contrib.layers.fully_connected(hidden4, num_outputs=self.latent_dim, activation_fn=None,
+            hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
 
@@ -561,10 +547,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20, 5])
 
                     for act in range(FLAGS.action_space):
-                        env_r = env_theta[act] * env_psi[:, act]
+                        env_r = env_theta * env_psi[:, act]
 
                         Q_r = np.dot(phi[:, :, act], w0_bar).reshape(-1)
-                        dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])
+                        dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])+ Sigma_e
 
                         Q0 = np.dot(phi[:, :, act], w0_bar)
 
@@ -574,7 +560,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                             ax[act].plot(env_state, Q0, 'b')
                             ax[act].fill_between(env_state, Q_r - 1.96 * dQ_r, Q_r + 1.96 * dQ_r, alpha=0.5)
                             ax[act].set_xlim([0., 1.])
-                            ax[act].set_ylim([-10, 10])
+                            ax[act].set_ylim([-12, 12])
                             ax[act].set_xlabel('State')
                             ax[act].set_ylabel('Reward')
                         else:
@@ -633,10 +619,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20, 5])
 
                         for act in range(FLAGS.action_space):
-                            env_r = env_theta[act] * env_psi[:, act]
+                            env_r = env_theta * env_psi[:, act]
 
                             Q_r = np.dot(phi[:, :, act], wt_bar).reshape(-1)
-                            dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], Lt_inv, phi[:, :, act])
+                            dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], Lt_inv, phi[:, :, act])+ Sigma_e
 
                             Q0 = np.dot(phi[:, :, act], w0_bar)
 
@@ -649,7 +635,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                 ax[act].scatter(state_train[delta], reward_train[delta], marker='x', color='r')
                                 ax[act].fill_between(env_state, Q_r - 1.96*dQ_r, Q_r + 1.96*dQ_r, alpha=0.5)
                                 ax[act].set_xlim([0., 1.])
-                                ax[act].set_ylim([-10, 10])
+                                ax[act].set_ylim([-12, 12])
                                 ax[act].set_xlabel('State')
                                 ax[act].set_ylabel('Reward')
                             else:
@@ -688,8 +674,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
 
-        if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio+ 0.1, 0.7])
+        #if episode % FLAGS.split_N == 0 and episode > 0:
+        #    split_ratio = np.min([split_ratio+ 0.1, 0.7])
 
         # Gradient descent
         for e in range(batch_size):
@@ -843,17 +829,17 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20,5])
 
             for act in range(FLAGS.action_space):
-                env_r = env_mu[act] * env_psi[:, act]
+                env_r = env_mu * env_psi[:, act]
 
                 Q_r = np.dot(phi[:, :, act], w0_bar[:, 0])
-                dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])
+                dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])+ Sigma_e
 
                 if FLAGS.action_space > 1:
                     ax[act].plot(env_state, env_r, 'r')
                     ax[act].plot(env_state, Q_r, 'b')
                     ax[act].fill_between(env_state, Q_r- 1.96*dQ_r, Q_r+ 1.96*dQ_r, alpha=0.5)
                     ax[act].set_xlim([0., 1.])
-                    ax[act].set_ylim([-10, 10])
+                    ax[act].set_ylim([-12, 12])
                     ax[act].set_xlabel('State')
                     ax[act].set_ylabel('Reward')
                 else:

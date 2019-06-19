@@ -42,7 +42,7 @@ class bandit_environment():
 
         psi = np.empty([len(state), 0])
         for a in range(self.action_dim):
-            psi = np.concatenate([psi, np.sin(4.2 * np.pi * state + phase[a] - np.pi* a/(self.action_dim+ 1.))], axis=1)
+            psi = np.concatenate([psi, np.sin(4.2 * np.pi * state + phase[a])], axis=1)
 
         return psi
 
