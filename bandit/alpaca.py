@@ -9,6 +9,7 @@ import time
 import logging
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
+import pandas as pd
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
@@ -23,12 +24,12 @@ tf.random.set_random_seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
+tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 1, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 32, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
-tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
+tf.flags.DEFINE_float("learning_rate", 2e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 
@@ -43,15 +44,15 @@ tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning"
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 10000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 30, "Length of episodes")
 
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
-tf.flags.DEFINE_float("regularizer", 0.1, "Regularization parameter")
+tf.flags.DEFINE_integer("save_frequency", 2000, "Store images every N-th episode")
+tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_float("rate", 0.0, "Dropout rate (1- keep_prob)")
 tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
 
@@ -60,7 +61,7 @@ tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
 
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.38)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
 
 class QNetwork():
     def __init__(self, scope="QNetwork"):
@@ -275,7 +276,7 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss1+ self.loss2+ FLAGS.regularizer* self.loss_reg
+        self.loss = self.loss1+ self.loss2+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
@@ -345,7 +346,7 @@ class QNetwork():
         # since I don't like to put the noise variance inside the prior
         Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context)) # noise precision
         Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0 # posterior precision
-        Lt_inv = tf.matrix_inverse(Lt) # posterior variance
+        Lt_inv = tf.linalg.inv(Lt) # posterior variance
         wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
                           tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
         wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean
@@ -441,6 +442,9 @@ basis_fcn_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/basis_fcn/'
 if not os.path.exists(basis_fcn_dir):
     os.makedirs(basis_fcn_dir)
 
+reward_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/'
+if not os.path.exists(reward_dir):
+    os.makedirs(reward_dir)
 
 # initialize replay memory and model
 fullbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
@@ -493,6 +497,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
     lossregBuffer = 0.
 
+    # report mean reward per episode
+    reward_episode = []
+
     # -----------------------------------------------------------------------------------
     # loop episodes
     print("Episodes...")
@@ -536,6 +543,53 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 new_experience = [state, action, reward, next_state, done]
                 tempbuffer.add(new_experience)
 
+
+
+                if step == 0 and n == 0 and episode % FLAGS.save_frequency == 0:
+
+                    # plot w* phi
+                    env_state = np.linspace(0, 1, 100)
+                    env_phase = env.phase
+                    env_psi = env._psi(env_state, env_phase)
+                    env_theta = env.theta
+
+                    w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
+                                                        feed_dict={QNet.state: env_state.reshape(-1, 1),
+                                                                   QNet.nprec: noise_precision,
+                                                                   QNet.rate_placeholder: 0.0})
+
+                    fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20, 5])
+
+                    for act in range(FLAGS.action_space):
+                        env_r = env_theta[act] * env_psi[:, act]
+
+                        Q_r = np.dot(phi[:, :, act], w0_bar).reshape(-1)
+                        dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])
+
+                        Q0 = np.dot(phi[:, :, act], w0_bar)
+
+                        if FLAGS.action_space > 1:
+                            ax[act].plot(env_state, env_r, 'r')
+                            ax[act].plot(env_state, Q_r, 'b--')
+                            ax[act].plot(env_state, Q0, 'b')
+                            ax[act].fill_between(env_state, Q_r - 1.96 * dQ_r, Q_r + 1.96 * dQ_r, alpha=0.5)
+                            ax[act].set_xlim([0., 1.])
+                            ax[act].set_ylim([-10, 10])
+                            ax[act].set_xlabel('State')
+                            ax[act].set_ylabel('Reward')
+                        else:
+                            ax.plot(env_state, env_r, 'r')
+                            ax.plot(env_state, Q_r, 'b')
+                            ax.plot(env_state, Q0, 'b--')
+                            ax.fill_between(env_state, Q_r - 1.96 * dQ_r, Q_r + 1.96 * dQ_r, alpha=0.5)
+
+                    plt.rc('font', size=16)
+                    plt.tight_layout()
+                    plt.savefig(rt_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
+                    plt.close()
+
+
+
                 # update posterior
                 # TODO: could speed up by iteratively adding
                 if (step+1) % FLAGS.update_freq == 0:
@@ -564,6 +618,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     # plot
                     if episode % FLAGS.save_frequency == 0 and n == 0:
 
+                        print('Max wt_bar: '+ str(np.max(np.abs(wt_bar)))+ ', Min wt_bar: '+ str(np.min(np.abs(wt_bar))))
+
                         # plot w* phi
                         env_state = np.linspace(0, 1, 100)
                         env_phase = env.phase
@@ -577,10 +633,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20, 5])
 
                         for act in range(FLAGS.action_space):
-                            env_r = env_theta * env_psi[:, act]
+                            env_r = env_theta[act] * env_psi[:, act]
 
                             Q_r = np.dot(phi[:, :, act], wt_bar).reshape(-1)
-                            dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], Lt_inv, phi[:, :, act])+ Sigma_e
+                            dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], Lt_inv, phi[:, :, act])
 
                             Q0 = np.dot(phi[:, :, act], w0_bar)
 
@@ -588,10 +644,14 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                             if FLAGS.action_space > 1:
                                 ax[act].plot(env_state, env_r, 'r')
-                                ax[act].plot(env_state, Q_r, 'b')
-                                ax[act].plot(env_state, Q0, 'b--')
+                                ax[act].plot(env_state, Q_r, 'b--')
+                                ax[act].plot(env_state, Q0, 'b')
                                 ax[act].scatter(state_train[delta], reward_train[delta], marker='x', color='r')
                                 ax[act].fill_between(env_state, Q_r - 1.96*dQ_r, Q_r + 1.96*dQ_r, alpha=0.5)
+                                ax[act].set_xlim([0., 1.])
+                                ax[act].set_ylim([-10, 10])
+                                ax[act].set_xlabel('State')
+                                ax[act].set_ylabel('Reward')
                             else:
                                 ax.plot(env_state, env_r, 'r')
                                 ax.plot(env_state, Q_r, 'b')
@@ -599,7 +659,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                 ax.scatter(state_train[delta], reward_train[delta], marker='x', color='r')
                                 ax.fill_between(env_state, Q_r - 1.96*dQ_r, Q_r + 1.96*dQ_r, alpha=0.5)
 
-                        plt.savefig(rt_dir + 'Epoch_' + str(episode)+ '_step_'+ str(step) + '_Reward')
+                        plt.rc('font', size=16)
+                        plt.tight_layout()
+                        plt.savefig(rt_dir + 'Epoch_' + str(episode)+ '_step_'+ str(step+1) + '_Reward')
                         plt.close()
 
 
@@ -608,13 +670,16 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 global_index += 1
                 step += 1
 
-                # count rewad
+                # count reward
                 rw.append(reward)
 
                 # -----------------------------------------------------------------------
 
             # append episode buffer to large buffer
             fullbuffer.add(tempbuffer.buffer)
+
+        # append reward
+        reward_episode.append(np.sum(np.array(rw)))
 
         # learning rate schedule
         if learning_rate > 5e-5:
@@ -778,25 +843,34 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20,5])
 
             for act in range(FLAGS.action_space):
-                env_r = env_mu * env_psi[:, act]
+                env_r = env_mu[act] * env_psi[:, act]
 
                 Q_r = np.dot(phi[:, :, act], w0_bar[:, 0])
-                dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])+ Sigma_e
+                dQ_r = np.einsum('bi,ij,bj->b', phi[:, :, act], np.linalg.inv(L0), phi[:, :, act])
 
                 if FLAGS.action_space > 1:
                     ax[act].plot(env_state, env_r, 'r')
                     ax[act].plot(env_state, Q_r, 'b')
                     ax[act].fill_between(env_state, Q_r- 1.96*dQ_r, Q_r+ 1.96*dQ_r, alpha=0.5)
+                    ax[act].set_xlim([0., 1.])
+                    ax[act].set_ylim([-10, 10])
+                    ax[act].set_xlabel('State')
+                    ax[act].set_ylabel('Reward')
                 else:
                     ax.plot(env_state, env_r, 'r')
                     ax.plot(env_state, Q_r, 'b')
                     ax.fill_between(env_state, Q_r - 1.96*dQ_r, Q_r + 1.96*dQ_r, alpha=0.5)
 
+            plt.rc('font', size=16)
+            plt.tight_layout()
             plt.savefig(r0_dir+'Epoch_'+str(episode)+'_Reward')
             plt.close()
 
             log.info('Episode %3.d with time per episode %5.2f', episode, (time.time()- start))
 
+    # write reward to file
+    df = pd.DataFrame(reward_episode)
+    df.to_csv(reward_dir+'reward_per_episode', index=False)
 
     # reset buffers
     fullbuffer.reset()
