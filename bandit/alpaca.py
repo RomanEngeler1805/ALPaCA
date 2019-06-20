@@ -20,7 +20,7 @@ sys.path.insert(0, './..')
 from replay_buffer import replay_buffer
 
 np.random.seed(1234)
-tf.random.set_random_seed(1234)
+tf.set_random_seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
@@ -33,7 +33,7 @@ tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 
-tf.flags.DEFINE_float("noise_precision", 0.8, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.3, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5.0, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1000, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.5, "Step of noise precision s*=ds")
@@ -54,7 +54,7 @@ tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to deter
 tf.flags.DEFINE_integer("save_frequency", 2000, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_float("rate", 0.0, "Dropout rate (1- keep_prob)")
-tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
+tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the first N iterations')
 
@@ -560,7 +560,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                             ax[act].plot(env_state, Q0, 'b')
                             ax[act].fill_between(env_state, Q_r - 1.96 * dQ_r, Q_r + 1.96 * dQ_r, alpha=0.5)
                             ax[act].set_xlim([0., 1.])
-                            ax[act].set_ylim([-12, 12])
+                            ax[act].set_ylim([-14, 14])
                             ax[act].set_xlabel('State')
                             ax[act].set_ylabel('Reward')
                         else:
@@ -635,7 +635,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                 ax[act].scatter(state_train[delta], reward_train[delta], marker='x', color='r')
                                 ax[act].fill_between(env_state, Q_r - 1.96*dQ_r, Q_r + 1.96*dQ_r, alpha=0.5)
                                 ax[act].set_xlim([0., 1.])
-                                ax[act].set_ylim([-12, 12])
+                                ax[act].set_ylim([-14, 14])
                                 ax[act].set_xlabel('State')
                                 ax[act].set_ylabel('Reward')
                             else:
@@ -674,8 +674,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
 
-        #if episode % FLAGS.split_N == 0 and episode > 0:
-        #    split_ratio = np.min([split_ratio+ 0.1, 0.7])
+        if episode % FLAGS.split_N == 0 and episode > 0:
+            split_ratio = np.min([split_ratio+ 0.1, 0.7])
 
         # Gradient descent
         for e in range(batch_size):
@@ -839,7 +839,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     ax[act].plot(env_state, Q_r, 'b')
                     ax[act].fill_between(env_state, Q_r- 1.96*dQ_r, Q_r+ 1.96*dQ_r, alpha=0.5)
                     ax[act].set_xlim([0., 1.])
-                    ax[act].set_ylim([-12, 12])
+                    ax[act].set_ylim([-14, 14])
                     ax[act].set_xlabel('State')
                     ax[act].set_ylabel('Reward')
                 else:
