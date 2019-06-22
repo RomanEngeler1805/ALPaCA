@@ -41,7 +41,7 @@ tf.flags.DEFINE_float("noise_precstep", 1.05, "Step of noise precision s*=ds")
 tf.flags.DEFINE_integer("split_N", 50, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
 
-tf.flags.DEFINE_integer("N_episodes", 2500, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 3500, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 10, "Length of episodes")
 
@@ -51,7 +51,6 @@ tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to deter
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
-
 tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the first N iterations')
 
 FLAGS = tf.flags.FLAGS
@@ -87,10 +86,9 @@ class QNetwork():
         with tf.variable_scope(scope):
             # build graph
             self._build_model()
-
     '''
     def model(self, x):
-         Embedding into latent space
+         Embedding into latent space 
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # two basis functions
             hh1 = tf.sin(4. * np.pi * x)
@@ -101,8 +99,8 @@ class QNetwork():
             encoding = tf.concat([hh1, hh5, hh2, hh5, hh5, hh1, hh5, hh2], axis=1)
 
         return tf.reshape(encoding, [-1, FLAGS.latent_space, self.action_dim])
-        '''
 
+    '''
     def model(self, x, a):
         ''' Embedding into latent space '''
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
@@ -111,24 +109,26 @@ class QNetwork():
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             hidden1 = self.activation(self.hidden1)
 
+            hidden1 = tf.concat([hidden1, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             hidden2 = self.activation(self.hidden2)
 
-            #hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
-
-            self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=2, activation_fn=None,
+            self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=None,
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             hidden3 = self.hidden3#self.activation(self.hidden3)
 
-            conc1 = tf.concat([hidden3, 0*hidden3], axis=1)
-            conc2 = tf.concat([0*hidden3, hidden3], axis=1)
+            hidden4 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
 
-            hidden3_rs = tf.concat([tf.reshape(conc1, [-1,4,1]), tf.reshape(conc2, [-1,4,1])], axis=2)
+            #conc1 = tf.concat([hidden3, 0*hidden3], axis=1)
+            #conc2 = tf.concat([0*hidden3, hidden3], axis=1)
+            #hidden3_rs = tf.concat([tf.reshape(conc1, [-1,4,1]), tf.reshape(conc2, [-1,4,1])], axis=2)
 
             # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
-            #hidden3_rs = tf.reshape(hidden3, [-1, self.action_dim, self.latent_dim])
-            #hidden3_rs = tf.transpose(hidden3_rs, [0, 2, 1])
+            hidden3_rs = tf.reshape(hidden4, [-1, self.action_dim, self.latent_dim])
+            hidden3_rs = tf.transpose(hidden3_rs, [0, 2, 1])
 
         return hidden3_rs
 
@@ -166,8 +166,8 @@ class QNetwork():
         context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
 
         # latent representation
-        self.context_phi = self.model(self.context_state, context_action_augm)  # latent space
-        self.context_phi_next = self.model(self.context_state_next, context_action_augm)  # latent space
+        self.context_phi = self.model(context_state, context_action_augm)  # latent space
+        self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
 
         self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.context_done = tf.placeholder(shape=[None, 1], dtype=tf.float32, name='done')
@@ -187,8 +187,8 @@ class QNetwork():
         state_next = self.state_trafo(self.state_next, action_augm)
 
         # latent representation
-        self.phi = self.model(self.state, action_augm) # latent space
-        self.phi_next = self.model(self.state_next, action_augm)  # latent space
+        self.phi = self.model(state, action_augm) # latent space
+        self.phi_next = self.model(state_next, action_augm)  # latent space
 
         self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
@@ -205,12 +205,19 @@ class QNetwork():
         self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
 
         # prior (updated via GD) ---------------------------------------------------------
+
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, initializer=tf.constant([[0.053], [1.88], [-0.013], [1.94]]),
-                                      trainable=False)#shape=[self.latent_dim,1])
-        #self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec)*tf.ones(self.latent_dim)) # cholesky
-        #L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
+                                      trainable=False)
         self.L0 = tf.get_variable('L0', dtype=tf.float32, initializer=tf.diag(tf.constant([0.20, 0.80, 0.20, 0.80])),
-                                      trainable=False)#tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
+                                      trainable=False)
+        '''
+
+        self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim, 1])
+        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32,
+                                       initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
+        L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
+        self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
+        '''
 
         self.sample_prior = self._sample_prior()
 
@@ -786,6 +793,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
                                                 feed_dict={QNet.state: env_state.reshape(-1,1),
                                                            QNet.nprec: noise_precision})
+
 
             fig, ax = plt.subplots(figsize=[10,5])
             color = iter(cm.rainbow(np.linspace(0, 1, phi.shape[1])))
