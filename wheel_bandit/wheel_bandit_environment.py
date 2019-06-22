@@ -28,7 +28,8 @@ class wheel_bandit_environment():
     def _sample_state(self):
         ''' resample state '''
         self.state = np.random.rand(self.n_dim) # [radius, phase]
-        return self.state
+        return np.array([self.state[0]* np.cos(2.*np.pi* self.state[1]),
+                                  self.state[0]* np.sin(2.*np.pi* self.state[1])])
 
     def _mu_idx(self, state):
         ''' used to calculate reward '''
@@ -59,7 +60,7 @@ class wheel_bandit_environment():
         d = 0
 
         # resample random data point
-        # self._sample_state()
+        self._sample_state()
 
         # observe (untransformed) state and reward
         obs = np.array([np.array([self.state[0]* np.cos(2.*np.pi* self.state[1]),
