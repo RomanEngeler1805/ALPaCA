@@ -20,7 +20,7 @@ sys.path.insert(0, './..')
 from replay_buffer import replay_buffer
 
 np.random.seed(1234)
-tf.random.set_random_seed(1234)
+tf.set_random_seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
@@ -30,7 +30,7 @@ tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 32, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("lr_drop", 1.002, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 0.3, "Noise precision (1/var)")
@@ -51,7 +51,7 @@ tf.flags.DEFINE_integer("L_episode", 40, "Length of episodes")
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 2000, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency",200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
 
@@ -60,7 +60,7 @@ tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
 
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.38)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.6)
 
 class QNetwork():
     def __init__(self, scope="QNetwork"):
@@ -91,34 +91,18 @@ class QNetwork():
             # build graph
             self._build_model()
 
-    def model(self, x, a):
+    def model(self, x):
         ''' Embedding into latent space '''
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
-            # model architecture
-            self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer),)
-            hidden1 = self.activation(self.hidden1)
-            self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
-                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
-            hidden2 = self.activation(self.hidden2)
-            hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+            # two basis functions
+            hh1 = tf.sin(4. * np.pi * x)
+            hh2 = tf.sin(4 * np.pi * x+ 2./4.*np.pi)
 
-            self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
-                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
-            hidden3 = self.activation(self.hidden3)
+            hh5 = tf.zeros(tf.shape(x))
 
-            # single head
-            hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
-                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
+            encoding = tf.concat([hh1, hh5, hh2, hh5, hh5, hh1, hh5, hh2], axis=1)
 
-            # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
-            hidden5_rs = tf.reshape(hidden5, [-1, self.action_dim, self.latent_dim])
-            hidden5_rs = tf.transpose(hidden5_rs, [0, 2, 1])
-
-        return hidden5_rs
+        return tf.reshape(encoding, [-1, FLAGS.latent_space, self.action_dim])
 
     def state_trafo(self, state, action):
         ''' append action to the state '''
@@ -154,12 +138,12 @@ class QNetwork():
         context_action_augm = tf.range(self.action_dim, dtype=tf.int32)
         context_action_augm = tf.tile(context_action_augm, [bsc])
 
-        context_state = self.state_trafo(self.context_state, context_action_augm)
-        context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
+        context_state = self.context_state#self.state_trafo(self.context_state, context_action_augm)
+        context_state_next = self.context_state_next#self.state_trafo(self.context_state_next, context_action_augm)
 
         # latent representation
-        self.context_phi = self.model(context_state, context_action_augm)  # latent space
-        self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
+        self.context_phi = self.model(context_state)#, context_action_augm)  # latent space
+        self.context_phi_next = self.model(context_state_next)#, context_action_augm)  # latent space
 
         self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.context_done = tf.placeholder(shape=[None, 1], dtype=tf.float32, name='done')
@@ -175,12 +159,12 @@ class QNetwork():
         action_augm = tf.range(self.action_dim, dtype=tf.int32)
         action_augm = tf.tile(action_augm, [bs])
 
-        state = self.state_trafo(self.state, action_augm)
-        state_next = self.state_trafo(self.state_next, action_augm)
+        state = self.state#self.state_trafo(self.state, action_augm)
+        state_next = self.state_next#self.state_trafo(self.state_next, action_augm)
 
         # latent representation
-        self.phi = self.model(state, action_augm) # latent space
-        self.phi_next = self.model(state_next, action_augm)  # latent space
+        self.phi = self.model(state)#, action_augm) # latent space
+        self.phi_next = self.model(state_next)#, action_augm)  # latent space
 
         self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
@@ -214,8 +198,7 @@ class QNetwork():
 
         # update posterior if there is data
         self.wt_bar, self.Lt_inv = tf.cond(bsc > 0,
-                                            lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken,
-                                                                        self.context_reward),
+                                            lambda: self._update_posterior(self.context_phi_taken, self.context_reward),
                                             lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
 
         # sample posterior
@@ -294,15 +277,11 @@ class QNetwork():
             weight_hist_summary = tf.summary.histogram("/weight/hist/%s" % idx, var)
             weight_summary.append(weight_hist_summary)
 
-        # prior last layer summaries
-        hidden1_hist = tf.summary.histogram("hidden1", self.hidden1)
-        hidden2_hist = tf.summary.histogram("hidden2", self.hidden2)
-        hidden3_hist = tf.summary.histogram("hidden3", self.hidden3)
+
 
         # concat summaries
         self.summaries_gradvar = tf.summary.merge([grad_summaries, weight_summary])
 
-        self.summaries_encodinglayer = tf.summary.merge([hidden1_hist, hidden2_hist, hidden3_hist])
 
 
     def _sample_prior(self):
@@ -555,7 +534,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                             ax[act].plot(env_state, Q0, 'b')
                             ax[act].fill_between(env_state, Q_r - 1.96 * dQ_r, Q_r + 1.96 * dQ_r, alpha=0.5)
                             ax[act].set_xlim([0., 1.])
-                            ax[act].set_ylim([-12, 12])
+                            ax[act].set_ylim([-14, 14])
                             ax[act].set_xlabel('State')
                             ax[act].set_ylabel('Reward')
                         else:
@@ -599,7 +578,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     # plot
                     if episode % FLAGS.save_frequency == 0 and n == 0:
 
-                        print('Max wt_bar: '+ str(np.max(np.abs(wt_bar)))+ ', Min wt_bar: '+ str(np.min(np.abs(wt_bar))))
+                        #print('Max wt_bar: '+ str(np.max(np.abs(wt_bar)))+ ', Min wt_bar: '+ str(np.min(np.abs(wt_bar))))
 
                         # plot w* phi
                         env_state = np.linspace(0, 1, 100)
@@ -630,7 +609,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                 ax[act].scatter(state_train[delta], reward_train[delta], marker='x', color='r')
                                 ax[act].fill_between(env_state, Q_r - 1.96*dQ_r, Q_r + 1.96*dQ_r, alpha=0.5)
                                 ax[act].set_xlim([0., 1.])
-                                ax[act].set_ylim([-12, 12])
+                                ax[act].set_ylim([-14, 14])
                                 ax[act].set_xlabel('State')
                                 ax[act].set_ylabel('Reward')
                             else:
@@ -711,8 +690,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             done_valid = done_sample[valid]
 
             # update model
-            grads, loss0, loss1, loss2, loss3, loss_reg, loss, summaries_encodinglayer = sess.run([QNet.gradients, QNet.loss0, QNet.loss1,
-                                                                          QNet.loss2, QNet.loss3, QNet.loss_reg, QNet.loss, QNet.summaries_encodinglayer],
+            grads, loss0, loss1, loss2, loss3, loss_reg, loss = sess.run([QNet.gradients, QNet.loss0, QNet.loss1,
+                                                                          QNet.loss2, QNet.loss3, QNet.loss_reg, QNet.loss],
                                                 feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                                                            QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                                            QNet.state: state_valid, QNet.action: action_valid,
@@ -757,7 +736,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             summary_writer.add_summary(lossreg_summary, episode)
             summary_writer.add_summary(reward_summary, episode)
             summary_writer.add_summary(summaries_gradvar, episode)
-            summary_writer.add_summary(summaries_encodinglayer, episode)
             summary_writer.add_summary(learning_rate_summary, episode)
 
             summary_writer.flush()
@@ -811,6 +789,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                                 feed_dict={QNet.state: env_state.reshape(-1,1),
                                                            QNet.nprec: noise_precision})
 
+            print(w0_bar.reshape(1,-1))
+            print(L0)
+
             fig, ax = plt.subplots(figsize=[10,5])
             color = iter(cm.rainbow(np.linspace(0, 1, phi.shape[1])))
             for bf in range(phi.shape[1]):
@@ -834,7 +815,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     ax[act].plot(env_state, Q_r, 'b')
                     ax[act].fill_between(env_state, Q_r- 1.96*dQ_r, Q_r+ 1.96*dQ_r, alpha=0.5)
                     ax[act].set_xlim([0., 1.])
-                    ax[act].set_ylim([-12, 12])
+                    ax[act].set_ylim([-14, 14])
                     ax[act].set_xlabel('State')
                     ax[act].set_ylabel('Reward')
                 else:

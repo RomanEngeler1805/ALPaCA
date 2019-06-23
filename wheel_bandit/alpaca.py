@@ -10,6 +10,7 @@ import logging
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 import pandas as pd
+from matplotlib import ticker
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
@@ -20,13 +21,13 @@ sys.path.insert(0, './..')
 from replay_buffer import replay_buffer
 
 np.random.seed(1234)
-tf.random.set_random_seed(1234)
+tf.set_random_seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 2, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 256, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 32, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
@@ -38,7 +39,7 @@ tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 2000, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.1, "Step of noise precision s*=ds")
 
-tf.flags.DEFINE_integer("split_N", 2000, "Increase split ratio every N steps")
+tf.flags.DEFINE_integer("split_N", 50, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
@@ -60,7 +61,7 @@ tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
 
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.38)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.30)
 
 class QNetwork():
     def __init__(self, scope="QNetwork"):
@@ -102,7 +103,7 @@ class QNetwork():
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.regularizer))
             hidden2 = self.activation(self.hidden2)
-            hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+            #hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
@@ -378,6 +379,25 @@ def eGreedyAction(x, epsilon=0.9):
 
     return action
 
+def quadrant(pos, delta):
+    quad = 0
+
+    if np.linalg.norm(pos) < delta:
+        quad = 0
+    else:
+        if pos[0] > 0 and pos[1] > 0:
+            quad = 1
+        elif pos[0] < 0 and pos[1] > 0:
+            quad = 2
+        elif pos[0] < 0 and pos[1] < 0:
+            quad = 3
+        elif pos[0] > 0 and pos[1] < 0:
+            quad = 4
+        else:
+            return -1
+
+    return quad
+
 
 # Main Routine ===========================================================================
 #
@@ -487,6 +507,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         # count reward
         rw = []
+        r_star = []
+        r_uni = []
 
         # loop tasks --------------------------------------------------------------------
         for n in range(FLAGS.N_tasks):
@@ -499,15 +521,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # resample state
             state = env._sample_state()
 
-            rw.append(0)
-
             # sample w from prior
             sess.run([QNet.sample_prior])
 
             # loop steps
             step = 0
 
+            # uniform expected reward
+            r_uni.append(FLAGS.L_episode*(1./5.* 1.2 + 1./5. * (env.delta**2 + 3.)* 1.0 + 1./5.* (1 - env.delta**2)* 50))
+
             while step < FLAGS.L_episode:
+
+                # max expected reward
+                r_star.append(np.max(env.mu[env._mu_idx(env.state)]))
 
                 # take a step
                 Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
@@ -518,8 +544,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 new_experience = [state, action, reward, next_state, done]
                 tempbuffer.add(new_experience)
 
+                # actual reward
+                rw.append(reward)
 
-                if step == 0 and n == 0 and episode % FLAGS.save_frequency == 0:
+
+                if step == 0 and n == 0 and episode % FLAGS.save_frequency in [0,1]:
 
                     # plot w* phi
                     env_rad = np.linspace(0., 1., 5)
@@ -538,8 +567,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                     for act in range(FLAGS.action_space):
                         Q_r = np.dot(phi[:, :, act], w0_bar).reshape(mesh_pha.shape)
-                        ax[act].contourf(mesh_pha, mesh_rad, Q_r)
+                        im = ax[act].contourf(mesh_pha, mesh_rad, Q_r)
                         ax[act].plot(env_pha, env_delta*np.ones([len(env_pha)]))
+
+                        cb = fig.colorbar(im, ax=ax[act], orientation="horizontal", pad=0.1)
+                        tick_locator = ticker.MaxNLocator(nbins=4)
+                        cb.locator = tick_locator
+                        cb.update_ticks()
 
                     plt.rc('font', size=16)
                     plt.tight_layout()
@@ -575,7 +609,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
 
                     # plot
-                    if n == 0 and episode % FLAGS.save_frequency == 0:
+                    if n == 0 and episode % FLAGS.save_frequency in [0,1]:
 
                         # plot w* phi
                         env_rad = np.linspace(0., 1., 5)
@@ -594,22 +628,43 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                         for act in range(FLAGS.action_space):
                             Q_r = np.dot(phi[:, :, act], wt_bar).reshape(mesh_pha.shape)
-                            ax[act].contourf(mesh_pha, mesh_rad, Q_r)
+                            im = ax[act].contourf(mesh_pha, mesh_rad, Q_r)
                             ax[act].plot(env_pha, env_delta * np.ones([len(env_pha)]))
+
+                            loc = np.where(action_train == act)  # to visualize which action network took
+                            rpos = np.linalg.norm(state_train[loc], axis=1)
+                            phipos = np.arctan2(state_train[loc, 1], state_train[loc, 0])
+                            ax[act].scatter(phipos, rpos, marker='o', color='r', s=1.+np.log(reward_train[loc])*8)
+
+                            cb = fig.colorbar(im, ax=ax[act], orientation="horizontal", pad=0.1)
+                            tick_locator = ticker.MaxNLocator(nbins=4)
+                            cb.locator = tick_locator
+                            cb.update_ticks()
 
                         plt.rc('font', size=16)
                         plt.tight_layout()
-                        plt.savefig(histo_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Qfcn')
+                        plt.savefig(histo_dir + 'Epoch_' + str(episode) + '_step_' + str(step+1) + '_Qfcn')
                         plt.close()
+
+                    if n == 0 and step == FLAGS.L_episode-1 and episode % FLAGS.save_frequency == 0:
+                        corr_matrix = np.zeros([5,5])
+
+                        for k, experience in enumerate(tempbuffer.buffer):
+                            # [s, a, r, s', a*, d]
+                            state_train = experience[0]
+                            action_train = experience[1]
+
+                            quadd = quadrant(state_train, env.delta)
+                            corr_matrix[quadd, action_train] += 1
+
+                        print(corr_matrix)
+                        print(np.sum(reward_train))
 
 
                 # update state, and counters
                 state = next_state
                 global_index += 1
                 step += 1
-
-                # count reward
-                rw.append(reward)
 
                 # -----------------------------------------------------------------------
 
@@ -627,7 +682,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio+ 0.1, 0.7])
+            split_ratio = np.min([split_ratio+ 0.01, 1.0])
 
         # Gradient descent
         for e in range(batch_size):
@@ -705,6 +760,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             loss3_summary = tf.Summary(value=[tf.Summary.Value(tag='KL_Loss', simple_value=(loss3Buffer / batch_size))])
             lossreg_summary = tf.Summary(value=[tf.Summary.Value(tag='Regularization_Loss', simple_value=(lossregBuffer / batch_size))])
             reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw)))])
+            regret_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Regret',
+                            simple_value=(np.sum(np.array(r_star))- np.sum(np.array(rw)))/ (np.sum(np.array(r_star))- np.sum(np.array(r_uni))))])
 
             learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
 
@@ -715,6 +772,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             summary_writer.add_summary(loss3_summary, episode)
             summary_writer.add_summary(lossreg_summary, episode)
             summary_writer.add_summary(reward_summary, episode)
+            summary_writer.add_summary(regret_summary, episode)
             summary_writer.add_summary(summaries_gradvar, episode)
             summary_writer.add_summary(summaries_encodinglayer, episode)
             summary_writer.add_summary(learning_rate_summary, episode)
@@ -762,7 +820,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
             print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
-            print('Learning_rate: '+ str(np.round(learning_rate,5))+ ', Nprec: '+ str(noise_precision))
+            print('Learning_rate: '+ str(np.round(learning_rate,5))+ ', Nprec: '+ str(noise_precision)+ ', Split ratio: '+ str(np.round(split_ratio, 2)))
 
             log.info('Episode %3.d with time per episode %5.2f', episode, (time.time()- start))
 
