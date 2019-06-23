@@ -14,11 +14,11 @@ class bandit_environment():
         self.action_dim = action_space
 
         # distribution of theta
-        self.L = 1. * np.eye(self.n_dim)  # cholesky of variance (Var= L^T L)
-        self.mu = 3. * np.ones([self.n_dim])
+        self.L = 1. * np.eye(self.action_dim)  # cholesky of variance (Var= L^T L)
+        self.mu = 3. * np.ones([self.action_dim])
 
         # draw new amplitude
-        self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
+        self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.action_dim)) # gaussian
 
         # draw new phase
         self.phase = np.random.rand(self.action_dim)* np.pi/ 1.
@@ -28,7 +28,7 @@ class bandit_environment():
 
     def _sample_env(self):
         ''' resample theta '''
-        self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.n_dim)) # gaussian
+        self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.action_dim)) # gaussian
         self.phase = np.random.rand(self.action_dim)* np.pi/ 1.
 
     def _sample_state(self):
@@ -53,7 +53,7 @@ class bandit_environment():
         psi = self._psi(self.state, self.phase)[0]
 
         # randomly perturbed reward
-        r = np.dot(self.theta, psi[action])#+ 0.3* np.random.normal()
+        r = np.dot(self.theta[action], psi[action])#+ 0.22* np.random.normal()
 
         d = 0
 
