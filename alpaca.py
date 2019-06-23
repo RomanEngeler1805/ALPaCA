@@ -5,8 +5,6 @@ Class structure for ALPaCA meta-RL code
 import numpy as np
 import tensorflow as tf
 import sys
-import random
-from collections import Counter
 import os
 import time
 import logging

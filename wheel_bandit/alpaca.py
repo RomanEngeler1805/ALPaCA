@@ -8,7 +8,6 @@ import os
 import time
 import logging
 import matplotlib.pyplot as plt
-from matplotlib.pyplot import cm
 import pandas as pd
 from matplotlib import ticker
 
