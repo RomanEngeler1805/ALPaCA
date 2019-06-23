@@ -215,8 +215,7 @@ class QNetwork():
 
         # update posterior if there is data
         self.wt_bar, self.Lt_inv = tf.cond(bsc > 0,
-                                            lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken,
-                                                                        self.context_reward),
+                                            lambda: self._update_posterior(self.context_phi_taken, self.context_reward),
                                             lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
 
         # sample posterior
@@ -584,7 +583,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # update posterior
                 # TODO: could speed up by iteratively adding
-                if (step+1) % FLAGS.update_freq == 0:
+                if (step+1) % FLAGS.update_freq == 0 and (step+1) <= np.int(split_ratio* FLAGS.L_episode):
                     reward_train = np.zeros([step+1, ])
                     state_train = np.zeros([step+1, FLAGS.state_space])
                     next_state_train = np.zeros([step+1, FLAGS.state_space])
@@ -634,7 +633,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                             loc = np.where(action_train == act)  # to visualize which action network took
                             rpos = np.linalg.norm(state_train[loc], axis=1)
                             phipos = np.arctan2(state_train[loc, 1], state_train[loc, 0])
-                            ax[act].scatter(phipos, rpos, marker='o', color='r', s=1.+np.log(reward_train[loc])*8)
+                            ax[act].scatter(phipos, rpos, marker='o', color='r', s=1.+np.log(reward_train[loc])*10)
 
                             cb = fig.colorbar(im, ax=ax[act], orientation="horizontal", pad=0.1)
                             tick_locator = ticker.MaxNLocator(nbins=4)
@@ -682,7 +681,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio+ 0.01, 1.0])
+            split_ratio = np.min([split_ratio+ 0.01, 0.5])
 
         # Gradient descent
         for e in range(batch_size):
@@ -761,7 +760,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             lossreg_summary = tf.Summary(value=[tf.Summary.Value(tag='Regularization_Loss', simple_value=(lossregBuffer / batch_size))])
             reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw)))])
             regret_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Regret',
-                            simple_value=(np.sum(np.array(r_star))- np.sum(np.array(rw)))/ (np.sum(np.array(r_star))- np.sum(np.array(r_uni))))])
+                            simple_value=(np.sum(np.array(r_star))- np.sum(np.array(rw))))])
+            regret_norm_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Regret (normalized)',
+                            simple_value=(np.sum(np.array(r_star))- np.sum(np.array(rw)))/ (np.sum(np.array(r_star)) - np.sum(np.array(r_uni))))])
 
             learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
 
@@ -773,6 +774,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             summary_writer.add_summary(lossreg_summary, episode)
             summary_writer.add_summary(reward_summary, episode)
             summary_writer.add_summary(regret_summary, episode)
+            summary_writer.add_summary(regret_norm_summary, episode)
             summary_writer.add_summary(summaries_gradvar, episode)
             summary_writer.add_summary(summaries_encodinglayer, episode)
             summary_writer.add_summary(learning_rate_summary, episode)
