@@ -38,7 +38,7 @@ tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 2000, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.1, "Step of noise precision s*=ds")
 
-tf.flags.DEFINE_integer("split_N", 50, "Increase split ratio every N steps")
+tf.flags.DEFINE_integer("split_N", 4000, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")

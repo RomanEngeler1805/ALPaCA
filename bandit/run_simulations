@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "==================="
+python alpaca.py --non_linearity='sigm' --learning_rate=5e-4 --noise_precision=2.5 --noise_precmax=3.0

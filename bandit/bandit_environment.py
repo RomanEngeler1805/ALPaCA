@@ -15,7 +15,7 @@ class bandit_environment():
 
         # distribution of theta
         self.L = 1. * np.eye(self.action_dim)  # cholesky of variance (Var= L^T L)
-        self.mu = 3. * np.ones(self.action_dim)
+        self.mu = 3. * np.ones([self.action_dim])
 
         # draw new amplitude
         self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.action_dim)) # gaussian
@@ -53,7 +53,7 @@ class bandit_environment():
         psi = self._psi(self.state, self.phase)[0]
 
         # randomly perturbed reward
-        r = np.dot(self.theta[action], psi[action])#+ 0.6* np.random.normal()
+        r = np.dot(self.theta[action], psi[action])#+ 0.22* np.random.normal()
 
         d = 0
 

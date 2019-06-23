@@ -24,37 +24,36 @@ tf.set_random_seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 2, "Dimensionality of action space")
+tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 1, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 32, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 4, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("latent_space", 32, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.002, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 0.3, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 5.0, "Maximum noise precision (1/var)")
-tf.flags.DEFINE_integer("noise_Ndrop", 100, "Increase noise precision every N steps")
-tf.flags.DEFINE_float("noise_precstep", 1.3, "Step of noise precision s*=ds")
+tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_integer("noise_Ndrop", 200, "Increase noise precision every N steps")
+tf.flags.DEFINE_float("noise_precstep", 1.1, "Step of noise precision s*=ds")
 
-tf.flags.DEFINE_integer("split_N", 100, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("split_N", 500, "Increase split ratio every N steps")
+tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 3500, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 20100, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 15, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 40, "Length of episodes")
 
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 1, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency",200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
-tf.flags.DEFINE_float("rate", 0.0, "Dropout rate (1- keep_prob)")
-tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
+tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the first N iterations')
 
@@ -122,7 +121,6 @@ class QNetwork():
         ''' constructing tensorflow model '''
         #
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
-        self.rate_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='keep_rate')
 
         # for kl divergence to change learning dynamics
         self.w0_bar_old = tf.placeholder(tf.float32, shape=[self.latent_dim, 1], name='w0_bar_old')
@@ -229,7 +227,7 @@ class QNetwork():
         # phi_hat* Lt_inv* phi_hat --------------------------
         self.phi_hat = phi_taken - self.gamma * phi_max
         #self.phi_hat = tf.stop_gradient(self.phi_hat)
-        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat, name='Sigma_pred')+  self.Sigma_e
+        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat, name='Sigma_pred')+  self.Sigma_e # column vector
         logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred))
 
         # loss
@@ -245,7 +243,7 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss1+ self.loss2+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
+        self.loss = self.loss1+ self.loss2#+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
@@ -499,15 +497,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             while step < FLAGS.L_episode:
 
                 # take a step
-                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,1),
-                                                        QNet.rate_placeholder: 1.0})
+                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,1)})
                 action = eGreedyAction(Qval, eps)
                 next_state, reward, done = env._step(action)
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
                 tempbuffer.add(new_experience)
-
 
 
                 if step == 0 and n == 0 and episode % FLAGS.save_frequency == 0:
@@ -520,8 +516,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                     w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
                                                         feed_dict={QNet.state: env_state.reshape(-1, 1),
-                                                                   QNet.nprec: noise_precision,
-                                                                   QNet.rate_placeholder: 0.0})
+                                                                   QNet.nprec: noise_precision})
 
                     fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20, 5])
 
@@ -578,7 +573,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                              feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                                         QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                         QNet.context_done: done_train,
-                                        QNet.nprec: noise_precision, QNet.rate_placeholder: 0.0})
+                                        QNet.nprec: noise_precision})
 
                     # plot
                     if episode % FLAGS.save_frequency == 0 and n == 0:
@@ -593,7 +588,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                         phi, w0_bar, Sigma_e = sess.run([QNet.phi, QNet.w0_bar, QNet.Sigma_e],
                                                         feed_dict={QNet.state: env_state.reshape(-1,1),
-                                                                   QNet.nprec: noise_precision, QNet.rate_placeholder: 0.0})
+                                                                   QNet.nprec: noise_precision})
 
                         fig, ax = plt.subplots(ncols=FLAGS.action_space, figsize=[20, 5])
 
@@ -701,7 +696,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                                            QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                                            QNet.state: state_valid, QNet.action: action_valid,
                                                            QNet.reward: reward_valid, QNet.state_next: next_state_valid,
-                                                           QNet.lr_placeholder: learning_rate, QNet.rate_placeholder: FLAGS.rate,
+                                                           QNet.lr_placeholder: learning_rate,
                                                            QNet.nprec: noise_precision,
                                                            QNet.w0_bar_old: w0_bar_old[0], QNet.L0_asym_old: L0_asym_old[0]})
 
@@ -757,7 +752,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         lossregBuffer *= 0.
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-        if episode < 2:
+        if episode < 3:
             batch_size *= 2
 
         # kl divergence updates
@@ -792,7 +787,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
                                                 feed_dict={QNet.state: env_state.reshape(-1,1),
-                                                           QNet.nprec: noise_precision, QNet.rate_placeholder: 0.0})
+                                                           QNet.nprec: noise_precision})
 
             print(w0_bar.reshape(1,-1))
             print(L0)
