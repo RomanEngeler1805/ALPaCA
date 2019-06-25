@@ -26,13 +26,13 @@ tf.set_random_seed(1234)
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
-tf.flags.DEFINE_integer("state_space", 7, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 12, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
+tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 1e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.01, "Drop of learning rate per episode")
-tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
+tf.flags.DEFINE_float("prior_precision", 0.2, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 10., "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 30, "Maximum noise precision (1/var)")
@@ -45,11 +45,11 @@ tf.flags.DEFINE_float("split_ratio", 0.2, "Initial split ratio for conditioning"
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
 
-tf.flags.DEFINE_integer("replay_memory_size", 40, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 16, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq", 4, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
@@ -381,6 +381,21 @@ def eGreedyAction(x, epsilon=0.9):
     return action
 
 
+def plot_Valuefcn(Valuefcn, target, save_path, states=np.array([])):
+    #
+    fig, ax = plt.subplots(figsize=[8, 3])
+    im = ax.imshow(Valuefcn.reshape(1, FLAGS.state_space))
+
+    ax.plot(target, 0, 'ro', markersize=20)
+
+    if len(state)> 0:
+        pos = np.argmax(states, axis=1)
+        ax.plot(pos, np.zeros(len(pos)), 'bo', markersize=20)  # imshow makes y-axis pointing downwards
+
+    fig.colorbar(im, orientation="horizontal", pad=0.2)
+    plt.savefig(save_path)
+    plt.close()
+
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
@@ -439,7 +454,7 @@ log.info('Build Tensorflow Graph')
 QNet = QNetwork() # neural network
 
 # initialize environment
-env = environment()
+env = environment(FLAGS.state_space)
 
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
@@ -530,14 +545,12 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 rw.append(reward)
 
                 # State Value Fcn -----------------------------------------------------------
-                if step == FLAGS.L_episode-1 and episode < 200:#and n == 0 and episode % FLAGS.save_frequency == 0:
+                if (step == 0 or step == FLAGS.L_episode-1 ) and n == 0 and episode % FLAGS.save_frequency == 0:
                     state_train = np.zeros([step + 1, FLAGS.state_space])
 
-                    # fill arrays
+                    # fill array
                     for k, experience in enumerate(tempbuffer.buffer):
-                        # [s, a, r, s', a*, d]
                         state_train[k] = experience[0]
-
 
                     tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
                     # state value
@@ -545,9 +558,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     for i in range(FLAGS.state_space):
                         ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
                         ss[i] = 1
-                        # i/5 downwards, i%5 rightwards
-                        # if i / 5 == tar[0] and i % 5 == tar[1]:  # add reward at target location
-                        #    ss[FLAGS.state_space - 1] = 1.
                         w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
                                                             feed_dict={QNet.state: ss.reshape(1, -1),
                                                                        QNet.nprec: noise_precision})
@@ -555,18 +565,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         Qout = np.dot(np.transpose(w0_bar), phi[0])
                         V_TS[i] = np.max(Qout)
 
-                    #
-                    fig, ax = plt.subplots(figsize=[8, 3])
-                    im = ax.imshow(V_TS.reshape(1, FLAGS.state_space))
-
-                    ax.plot(tar, 0, 'ro', markersize=20)
-
-                    pos = np.argmax(state_train, axis=1)
-                    ax.plot(pos, np.linspace(-0.3, 0.3, len(pos)), 'bo', markersize=20)  # imshow makes y-axis pointing downwards
-
-                    fig.colorbar(im, orientation="horizontal", pad=0.2)
-                    plt.savefig(V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step))
-                    plt.close()
+                    # plotting
+                    plot_Valuefcn(V_TS, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step), state_train)
 
 
                 # update posterior
@@ -611,22 +611,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                             V_TS[i] = np.max(Qout)
 
-                        #
-                        fig, ax = plt.subplots(figsize=[8, 3])
-                        im = ax.imshow(V_TS.reshape(1, FLAGS.state_space))
-
-                        ax.plot(tar, 0, 'ro', markersize=20)
-
-                        pos = np.argmax(state_train, axis=1)
-                        ax.plot(pos, np.zeros(len(pos)), 'bo', markersize=20)  # imshow makes y-axis pointing downwards
-
-                        fig.colorbar(im, orientation="horizontal", pad=0.2)
-                        plt.savefig(V_TS_dir + 'Epoch_' + str(episode) + '_Step_' + str(step))
-                        plt.close()
-
+                        # plotting
+                        plot_Valuefcn(V_TS, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step), state_train)
 
                     # -----------------------------------------------------------------------
-
 
                 # update state, and counters
                 state = next_state.copy()
@@ -648,8 +636,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
 
-        if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio + 0.01, 0.2])
+        #if episode % FLAGS.split_N == 0 and episode > 0:
+        #    split_ratio = np.min([split_ratio + 0.01, 0.2])
 
         # Gradient descent
         for e in range(batch_size):
@@ -781,7 +769,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # ================================================================
         # print to console
             # print to console
-        if episode % FLAGS.save_frequency == 0:
+        if episode % FLAGS.save_frequency == 0 and False == True:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
             print('Reward in Episode ' + str(episode) + ':   ' + str(np.sum(rw)))

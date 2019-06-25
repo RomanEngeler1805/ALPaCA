@@ -3,9 +3,9 @@ import numpy as np
 class environment():
     ''' 7x1 square environment with reward sampled at random in corners '''
 
-    def __init__(self):
+    def __init__(self, state_space):
         # size of square
-        self.size = 7
+        self.size = state_space
 
         # initialize agent
         self.state = np.zeros([self.size])
