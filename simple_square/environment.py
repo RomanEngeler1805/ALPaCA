@@ -19,16 +19,19 @@ class environment():
 
     def _sample_env(self):
         ''' resample delta '''
-        self.state = np.zeros([self.size])
-        self.state[(self.size - 1) / 2] = 1
-
         self.target = np.array((self.size-1) * np.random.randint(0, 2))
 
+    def _sample_state(self):
+        self.state = np.zeros([self.size])
+        self.state[(self.size - 1) / 2] = 1
+        return self.state
 
     def reward(self):
         ''' reward function '''
         if self.state[self.target] == 1:
             return 1
+        else:
+            return -0.1
         return 0
 
     def termination(self):
