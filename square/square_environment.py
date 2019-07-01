@@ -16,13 +16,13 @@ class square_environment():
 
         # initialize target
         target_x = (self.size-1) * np.random.randint(0, 2)
-        target_y = 4#(self.size-1) * np.random.randint(0, 2)
+        target_y = 2 # (self.size-1) * np.random.randint(0, 2)
         self.target = np.array([target_x, target_y])
 
     def _sample_env(self):
         ''' resample delta '''
         target_x = (self.size - 1) * np.random.randint(0, 2)
-        target_y = 4  # (self.size-1) * np.random.randint(0, 2)
+        target_y = 2  # (self.size-1) * np.random.randint(0, 2)
         self.target = np.array([target_x, target_y])
 
     def _sample_state(self):
@@ -57,17 +57,29 @@ class square_environment():
         # update reward
         r = self.reward()
 
+        '''
         if not d:
             if action == 1 and posy != 0: # left
-                self.state[posx, posy] = 0
-                self.state[posx, posy - 1] = 1
+                #self.state[posx, posy] = 0
+                #self.state[posx, posy - 1] = 1
+                self.state=self.state
             if action == 2 and posx != self.size-1: # down
                 self.state[posx, posy] = 0
                 self.state[posx + 1, posy] = 1
             if action == 3 and posy != self.size-1: # right
-                self.state[posx, posy] = 0
-                self.state[posx, posy + 1] = 1
+                #self.state[posx, posy] = 0
+                #self.state[posx, posy + 1] = 1
+                self.state=self.state
             if action == 4 and posx != 0: # up
+                self.state[posx, posy] = 0
+                self.state[posx - 1, posy] = 1
+        '''
+
+        if not d:
+            if action == 1 and posx != self.size-1: # left
+                self.state[posx, posy] = 0
+                self.state[posx + 1, posy] = 1
+            if action == 2 and posx != 0: # down
                 self.state[posx, posy] = 0
                 self.state[posx - 1, posy] = 1
 

@@ -24,13 +24,13 @@ np.random.seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
+tf.flags.DEFINE_integer("action_space",3, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 5, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.93, "Discount factor")
-tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.0005, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("learning_rate", 2e-3, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.2, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 20., "Noise precision (1/var)")
@@ -39,7 +39,7 @@ tf.flags.DEFINE_integer("noise_Ndrop", 50, "Increase noise precision every N ste
 tf.flags.DEFINE_float("noise_precstep", 1.01, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 50, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.90, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.20, "Initial split ratio for conditioning")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
@@ -53,7 +53,7 @@ tf.flags.DEFINE_integer("update_freq", 5, "Update frequency of posterior and sam
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
-tf.flags.DEFINE_string('non_linearity', 'tanh', 'Non-linearity used in encoder')
+tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the first N iterations')
 
