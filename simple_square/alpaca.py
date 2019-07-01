@@ -14,42 +14,43 @@ from matplotlib import ticker
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
-from square_environment import square_environment
+from environment import environment
 
 import sys
 sys.path.insert(0, './..')
 from replay_buffer import replay_buffer
 
 np.random.seed(1234)
+tf.set_random_seed(1234)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space",3, "Dimensionality of action space")
-tf.flags.DEFINE_integer("state_space", 5, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
+tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
+tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
-tf.flags.DEFINE_float("gamma", 0.93, "Discount factor")
-tf.flags.DEFINE_float("learning_rate", 2e-3, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
+tf.flags.DEFINE_float("learning_rate", 1e-2, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.01, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.2, "Prior precision (1/var)")
 
-tf.flags.DEFINE_float("noise_precision", 20., "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 10., "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 30, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 50, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.01, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 50, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.20, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.2, "Initial split ratio for conditioning")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 10000, "Number of episodes")
-tf.flags.DEFINE_integer("N_tasks", 1, "Number of tasks")
+tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
+tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
 
-tf.flags.DEFINE_integer("replay_memory_size", 8, "Size of replay memory")
-tf.flags.DEFINE_integer("update_freq", 5, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_integer("replay_memory_size", 16, "Size of replay memory")
+tf.flags.DEFINE_integer("update_freq", 4, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
@@ -66,7 +67,7 @@ class QNetwork():
     def __init__(self, scope="QNetwork"):
         self.gamma = FLAGS.gamma
         self.action_dim = FLAGS.action_space
-        self.state_dim = FLAGS.state_space**2
+        self.state_dim = FLAGS.state_space
         self.hidden_dim = FLAGS.hidden_space
         self.latent_dim = FLAGS.latent_space
         self.cprec = FLAGS.prior_precision
@@ -382,17 +383,14 @@ def eGreedyAction(x, epsilon=0.9):
 
 def plot_Valuefcn(Valuefcn, target, save_path, states=np.array([])):
     #
-    fig, ax = plt.subplots(figsize=[10, 10])
-    im = ax.imshow(Valuefcn.reshape(FLAGS.state_space, FLAGS.state_space))
+    fig, ax = plt.subplots(figsize=[8, 3])
+    im = ax.imshow(Valuefcn.reshape(1, FLAGS.state_space))
 
-    ax.plot(target[1], target[0], 'ro', markersize=20)
+    ax.plot(target, 0, 'ro', markersize=20)
 
-    if state.shape[0]> 0:
+    if len(state)> 0:
         pos = np.argmax(states, axis=1)
-        # i/5 downwards, i%5 rightwards.
-        xpos = pos % 5
-        ypos = pos / 5
-        ax.plot(xpos, ypos, 'bo', markersize=20)  # imshow makes y-axis pointing downwards
+        ax.plot(pos, np.zeros(len(pos)), 'bo', markersize=20)  # imshow makes y-axis pointing downwards
 
     fig.colorbar(im, orientation="horizontal", pad=0.2)
     plt.savefig(save_path)
@@ -437,9 +435,9 @@ V_M_dir = './figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/Q_Fcn/'
 if not os.path.exists(V_M_dir):
     os.makedirs(V_M_dir)
 
-histo_dir = './figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/histo/'
-if not os.path.exists(histo_dir):
-    os.makedirs(histo_dir)
+V_TS_dir = './figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/Q_TS_Fcn/'
+if not os.path.exists(V_TS_dir):
+    os.makedirs(V_TS_dir)
 
 basis_fcn_dir = './figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/basis_fcn/'
 if not os.path.exists(basis_fcn_dir):
@@ -456,7 +454,7 @@ log.info('Build Tensorflow Graph')
 QNet = QNetwork() # neural network
 
 # initialize environment
-env = square_environment(FLAGS.state_space)
+env = environment(FLAGS.state_space)
 
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
@@ -534,13 +532,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             while step < FLAGS.L_episode:
                 # take a step
-                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space**2)})
+                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
                 action = eGreedyAction(Qval, eps)
 
                 next_state, reward, done = env._step(action)
-
-
-                #print('state '+ str(np.argmax(state))+ ', action '+ str(action)+ ', reward '+ str(reward)+ ', next_state '+ str(np.argmax(next_state)))
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
@@ -550,8 +545,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 rw.append(reward)
 
                 # State Value Fcn -----------------------------------------------------------
-                if (step == 0) and n == 0 and episode % FLAGS.save_frequency == 0:
-                    state_train = np.zeros([step + 1, FLAGS.state_space**2])
+                if (step == 0 or step == FLAGS.L_episode-1 ) and n == 0 and episode % FLAGS.save_frequency == 0:
+                    state_train = np.zeros([step + 1, FLAGS.state_space])
 
                     # fill array
                     for k, experience in enumerate(tempbuffer.buffer):
@@ -559,13 +554,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                     tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
                     # state value
-                    V_TS = np.zeros([FLAGS.state_space**2])
-                    for i in range(FLAGS.state_space**2):
-                        ss = np.zeros([FLAGS.state_space**2])  # loop over one-hot encoding
+                    V_TS = np.zeros([FLAGS.state_space])
+                    for i in range(FLAGS.state_space):
+                        ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
                         ss[i] = 1
                         w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
                                                             feed_dict={QNet.state: ss.reshape(1, -1),
-                                                                           QNet.nprec: noise_precision})
+                                                                       QNet.nprec: noise_precision})
 
                         Qout = np.dot(np.transpose(w0_bar), phi[0])
                         V_TS[i] = np.max(Qout)
@@ -573,31 +568,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     # plotting
                     plot_Valuefcn(V_TS, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step), state_train)
 
-                # plot state visitation histogram
-                if step == FLAGS.L_episode - 1 and n == 0 and episode % FLAGS.save_frequency == 0:
-                    state_train = np.zeros([step + 1, FLAGS.state_space ** 2])
-
-                    # fill arrays
-                    for k, experience in enumerate(tempbuffer.buffer):
-                        # [s, a, r, s', a*, d]
-                        state_train[k] = experience[0]
-
-                    states_count = np.sum(state_train, axis=0)
-
-                    fig, ax = plt.subplots(figsize=[6,6])
-                    im = ax.imshow(np.log(1.+states_count.reshape(FLAGS.state_space, FLAGS.state_space)))
-                    fig.colorbar(im, orientation="horizontal", pad=0.2)
-
-                    plt.savefig(histo_dir+ 'Epoch_' + str(episode) + '_Step_' + str(step))
-                    plt.close()
-
 
                 # update posterior
                 # TODO: could speed up by iteratively adding
                 if (step+1) % FLAGS.update_freq == 0 and (step+1) <= np.int(split_ratio* FLAGS.L_episode):
                     reward_train = np.zeros([step+1, ])
-                    state_train = np.zeros([step+1, FLAGS.state_space**2])
-                    next_state_train = np.zeros([step+1, FLAGS.state_space**2])
+                    state_train = np.zeros([step+1, FLAGS.state_space])
+                    next_state_train = np.zeros([step+1, FLAGS.state_space])
                     action_train = np.zeros([step+1, ])
                     done_train = np.zeros([step+1, 1])
 
@@ -621,9 +598,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     if (episode) % FLAGS.save_frequency == 0 and n == 0:
                         tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
                         # state value
-                        V_TS = np.zeros([FLAGS.state_space**2])
-                        for i in range(FLAGS.state_space**2):
-                            ss = np.zeros([FLAGS.state_space**2])  # loop over one-hot encoding
+                        V_TS = np.zeros([FLAGS.state_space])
+                        for i in range(FLAGS.state_space):
+                            ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
                             ss[i] = 1
                             # i/5 downwards, i%5 rightwards
                             #if i / 5 == tar[0] and i % 5 == tar[1]:  # add reward at target location
@@ -638,7 +615,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         plot_Valuefcn(V_TS, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step), state_train)
 
                     # -----------------------------------------------------------------------
-
 
                 # update state, and counters
                 state = next_state.copy()
@@ -669,10 +645,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # sample from larger buffer [s, a, r, s', d] with current experience not yet included
             experience = fullbuffer.sample(1)
 
-            state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space**2))
+            state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
             action_sample = np.zeros((FLAGS.L_episode,))
             reward_sample = np.zeros((FLAGS.L_episode,))
-            next_state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space**2))
+            next_state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
             done_sample = np.zeros((FLAGS.L_episode,))
 
             # fill arrays
@@ -702,7 +678,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             done_valid = done_sample[valid]
 
             # update model
-            _, grads, loss0, loss1, loss2, loss3, loss_reg, loss, summaries_encodinglayer = sess.run([QNet.wt_bar, QNet.gradients, QNet.loss0, QNet.loss1,
+            grads, loss0, loss1, loss2, loss3, loss_reg, loss, summaries_encodinglayer = sess.run([QNet.gradients, QNet.loss0, QNet.loss1,
                                                                           QNet.loss2, QNet.loss3, QNet.loss_reg, QNet.loss, QNet.summaries_encodinglayer],
                                                 feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                                                            QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
@@ -738,7 +714,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             loss2_summary = tf.Summary(value=[tf.Summary.Value(tag='Sig_Loss', simple_value=(loss2Buffer / batch_size))])
             loss3_summary = tf.Summary(value=[tf.Summary.Value(tag='KL_Loss', simple_value=(loss3Buffer / batch_size))])
             lossreg_summary = tf.Summary(value=[tf.Summary.Value(tag='Regularization_Loss', simple_value=(lossregBuffer / batch_size))])
-            reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw))/(FLAGS.L_episode* FLAGS.N_tasks))])
+            reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw)))])
 
             learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
 
@@ -793,7 +769,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # ================================================================
         # print to console
             # print to console
-        if episode % FLAGS.save_frequency == 0:
+        if episode % FLAGS.save_frequency == 0 and False == True:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
             print('Reward in Episode ' + str(episode) + ':   ' + str(np.sum(rw)))
@@ -802,29 +778,27 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             log.info('Episode %3.d with time per episode %5.2f', episode, (time.time() - start))
 
             # plot basis functions
-            basis_fcn = np.zeros([FLAGS.latent_space, FLAGS.action_space, FLAGS.state_space**2])
+            basis_fcn = np.zeros([FLAGS.latent_space, FLAGS.action_space, FLAGS.state_space])
 
-            for i in range(FLAGS.state_space**2):
-                ss = np.zeros([FLAGS.state_space**2])  # loop over one-hot encoding
+            for i in range(FLAGS.state_space):
+                ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
                 ss[i] = 1
                 phi = sess.run(QNet.phi, feed_dict={QNet.state: ss.reshape(1, -1), QNet.nprec: noise_precision})
                 basis_fcn[:, :, i] = phi
 
-            nrows = np.min([12, FLAGS.latent_space])
+            fig, ax = plt.subplots(nrows=FLAGS.latent_space, ncols=FLAGS.action_space,
+                                    figsize=[FLAGS.latent_space, FLAGS.action_space * 2])
 
-            fig, ax = plt.subplots(nrows=nrows, ncols=FLAGS.action_space,
-                                    figsize=[60, FLAGS.action_space * 2])
-
-            for bf in range(nrows):
+            for bf in range(FLAGS.latent_space):
                 for act in range(FLAGS.action_space):
-                    im = ax[bf, act].imshow(basis_fcn[bf, act, :].reshape(1, -1))
+                    ax[bf, act].imshow(basis_fcn[bf, act, :].reshape(1, -1))
 
-                    #cb = fig.colorbar(im, ax=ax[bf, act], orientation="horizontal", pad=0.2)
-                    #tick_locator = ticker.MaxNLocator(nbins=4)
-                    #cb.locator = tick_locator
-                    #cb.update_ticks()
+                    cb = fig.colorbar(im, ax=ax[bf, act], orientation="horizontal", pad=0.2)
+                    tick_locator = ticker.MaxNLocator(nbins=4)
+                    cb.locator = tick_locator
+                    cb.update_ticks()
 
-            #fig.suptitle('Stay; Left; Right')
+            fig.suptitle('Stay; Left; Right')
             plt.tight_layout()
             plt.savefig(basis_fcn_dir + 'Epoch_' + str(episode))
             plt.close()
