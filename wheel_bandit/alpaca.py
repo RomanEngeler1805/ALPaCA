@@ -35,10 +35,10 @@ tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 0.3, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
-tf.flags.DEFINE_integer("noise_Ndrop", 2000, "Increase noise precision every N steps")
-tf.flags.DEFINE_float("noise_precstep", 1.1, "Step of noise precision s*=ds")
+tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N steps")
+tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
-tf.flags.DEFINE_integer("split_N", 4000, "Increase split ratio every N steps")
+tf.flags.DEFINE_integer("split_N", 50, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
@@ -60,7 +60,7 @@ tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
 
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.30)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.38)
 
 class QNetwork():
     def __init__(self, scope="QNetwork"):
@@ -214,8 +214,12 @@ class QNetwork():
 
         # update posterior if there is data
         self.wt_bar, self.Lt_inv = tf.cond(bsc > 0,
-                                            lambda: self._update_posterior(self.context_phi_taken, self.context_reward),
+                                            lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken, self.context_reward),
                                             lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+
+        # self._update_posterior(self.context_phi_taken, self.context_reward),
+
+
 
         # sample posterior
         with tf.control_dependencies([self.wt_bar, self.Lt_inv]):
@@ -360,7 +364,9 @@ class QNetwork():
             phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
 
         # stop gradient through context
-        phi_hat = tf.stop_gradient(phi_hat)
+        phi_max = tf.stop_gradient(phi_max)
+
+        phi_hat = phi_taken - self.gamma * phi_max
 
         # update posterior distribution
         wt_bar, Lt_inv = self._update_posterior(phi_hat, reward)
@@ -526,12 +532,17 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             step = 0
 
             # uniform expected reward
-            r_uni.append(FLAGS.L_episode*(1./5.* 1.2 + 1./5. * (env.delta**2 + 3.)* 1.0 + 1./5.* (1 - env.delta**2)* 50))
+            # r_uni.append(FLAGS.L_episode*(1./5.* 1.2 + 1./5. * (env.delta**2 + 3.)* 1.0 + 1./5.* (1 - env.delta**2)* 50)) # this is indeed the expectation -> might differ from observations
 
             while step < FLAGS.L_episode:
 
-                # max expected reward
+                # max reward (neglect stdv)
                 r_star.append(np.max(env.mu[env._mu_idx(env.state)]))
+                # uniform reward
+                if np.linalg.norm(env.state) <= env.delta:
+                    r_uni.append(1./5.* env.mu[0]+ 4./5.* env.mu[1])
+                else:
+                    r_uni.append(1./5.* env.mu[0]+ 3./5.* env.mu[1]+ 1./5.* env.mu[2])
 
                 # take a step
                 Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
@@ -821,7 +832,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
             print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
-            print('Learning_rate: '+ str(np.round(learning_rate,5))+ ', Nprec: '+ str(noise_precision)+ ', Split ratio: '+ str(np.round(split_ratio, 2)))
+            print('Learning_rate: '+ str(np.round(learning_rate,4))+ ', Nprec: '+ str(np.round(noise_precision,4))+ ', Split ratio: '+ str(np.round(split_ratio, 2)))
 
             log.info('Episode %3.d with time per episode %5.2f', episode, (time.time()- start))
 
