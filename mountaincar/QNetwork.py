@@ -11,6 +11,7 @@ class QNetwork():
         self.lr = FLAGS.learning_rate
         self.iter_amax = FLAGS.iter_amax
         self.regularizer = FLAGS.regularizer
+        self.scope = scope
 
         # activation function
         if FLAGS.non_linearity == 'sigm':
@@ -26,7 +27,7 @@ class QNetwork():
         else:
             self.activation = tf.nn.relu
 
-        with tf.variable_scope(scope):
+        with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
             # build graph
             self._build_model()
 
@@ -173,8 +174,11 @@ class QNetwork():
         phi_max = tf.stop_gradient(phi_max)
 
         # last factor to account for case that s is terminating state
-        Qmax = tf.einsum('im,bi->b', self.wt_bar, phi_max, name='Qmax')
-        self.Qtarget = self.reward + self.gamma * tf.multiply(1- self.done, Qmax)
+        self.Qmax = tf.einsum('im,bi->b', self.wt_bar, phi_max, name='Qmax')
+        self.Qmax_target = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')
+
+        self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_target)
+        #self.Qtarget = self.reward + self.gamma * tf.multiply(1- self.done, Qmax)
         #self.Qtarget = tf.stop_gradient(self.Qtarget)
 
         # Q(s',a*)+ r- Q(s,a)
@@ -204,18 +208,28 @@ class QNetwork():
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
 
+        self.tvars = tf.trainable_variables(scope=self.scope)  # [v for v in tf.trainable_variables() if v.name!='QNetwork/L0_asym:0']
+
+
         # gradient
-        tvars = tf.trainable_variables() #[v for v in tf.trainable_variables() if v.name!='QNetwork/L0_asym:0']
         self.gradient_holders = []
-        for idx, var in enumerate(tvars):
+        for idx, var in enumerate(self.tvars):
             placeholder = tf.placeholder(tf.float32, name=str(idx) + '_holder')
             self.gradient_holders.append(placeholder)
 
         # symbolic gradient of loss w.r.t. tvars
-        self.gradients = self.optimizer.compute_gradients(self.loss, tvars)
+        self.gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
 
         #
-        self.updateModel = self.optimizer.apply_gradients(zip(self.gradient_holders, tvars))
+        self.updateModel = self.optimizer.apply_gradients(zip(self.gradient_holders, self.tvars))
+
+        # variable
+        self.variable_holders = []
+        for idx, var in enumerate(self.tvars):
+            placeholder = tf.placeholder(tf.float32, name=str(idx) + '_holder')
+            self.variable_holders.append(placeholder)
+
+        self.copyParams = self.copy_params()
 
         # summaries ========================================================================
         variables_names = [v.name for v in tf.trainable_variables()]
@@ -227,9 +241,8 @@ class QNetwork():
             grad_summaries.append(grad_hist_summary)
 
         # keep track of weights
-        tvars = tf.trainable_variables()
         weight_summary = []
-        for idx, var in zip(variables_names, tvars):
+        for idx, var in zip(variables_names, self.tvars):
             weight_hist_summary = tf.summary.histogram("/weight/hist/%s" % idx, var)
             weight_summary.append(weight_hist_summary)
 
@@ -240,6 +253,8 @@ class QNetwork():
 
         # concat summaries
         self.summaries_gradvar = tf.summary.merge([grad_summaries, weight_summary])
+
+        self.summaries_var = tf.summary.merge(weight_summary)
 
         self.summaries_encodinglayer = tf.summary.merge([hidden1_hist, hidden2_hist, hidden3_hist])
 
@@ -307,3 +322,13 @@ class QNetwork():
         wt_bar, Lt_inv = self._update_posterior(phi_hat, reward)
 
         return wt_bar, Lt_inv
+
+
+
+    def copy_params(self):
+        # copy parameters
+        update_op = []
+        for (v_old, v_new) in zip(self.tvars, self.variable_holders):
+            update_op.append(tf.assign(v_old, v_new))
+
+        return update_op

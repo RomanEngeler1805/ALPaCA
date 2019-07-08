@@ -30,10 +30,10 @@ tf.flags.DEFINE_float("learning_rate", 1e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
 
-tf.flags.DEFINE_float("noise_precision", 0.3, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 10, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 20, "Increase noise precision every N steps")
-tf.flags.DEFINE_float("noise_precstep", 1.03, "Step of noise precision s*=ds")
+tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
@@ -46,8 +46,9 @@ tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
 
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
-tf.flags.DEFINE_integer("update_freq", 220, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_integer("update_freq_post", 220, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
+tf.flags.DEFINE_integer("update_freq_target", 10, "Update frequency of target network")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
@@ -121,12 +122,14 @@ if not os.path.exists(V0_dir):
 fullbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
 tempbuffer = replay_buffer(FLAGS.L_episode) # buffer for episode
 log.info('Build Tensorflow Graph')
-QNet = QNetwork(FLAGS) # neural network
 
 # initialize environment
 env = MountainCarEnv() #gym.make('MountainCar-v0')
 
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+
+    QNet = QNetwork(FLAGS, scope='QNetwork')  # neural network
+    Qtarget = QNetwork(FLAGS, scope='TargetNetwork')
 
     # session
     init = tf.global_variables_initializer()
@@ -224,7 +227,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # update posterior
                 # TODO: could speed up by iteratively adding
-                if (step+1) % FLAGS.update_freq == 0 and (step+1) <= np.int(split_ratio* FLAGS.L_episode):
+                if (step+1) % FLAGS.update_freq_post == 0 and (step+1) <= np.int(split_ratio* FLAGS.L_episode):
                     reward_train = np.zeros([step+1, ])
                     state_train = np.zeros([step+1, FLAGS.state_space])
                     next_state_train = np.zeros([step+1, FLAGS.state_space])
@@ -358,17 +361,23 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             next_state_valid = next_state_sample[valid, :]
             done_valid = done_sample[valid]
 
+            # evaluate target model
+            Qmax_target = sess.run(Qtarget.Qmax,
+                feed_dict={Qtarget.context_state: state_train, Qtarget.context_action: action_train,
+                           Qtarget.context_reward: reward_train, Qtarget.context_state_next: next_state_train,
+                           Qtarget.state: state_valid, Qtarget.state_next: next_state_valid,
+                           Qtarget.nprec: noise_precision})
+
             # update model
-            grads, loss0, loss1, loss2, loss3, loss_reg, loss, summaries_encodinglayer = sess.run([QNet.gradients, QNet.loss0, QNet.loss1,
-                                                                          QNet.loss2, QNet.loss3, QNet.loss_reg, QNet.loss, QNet.summaries_encodinglayer],
-                                                feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
-                                                           QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
-                                                           QNet.state: state_valid, QNet.action: action_valid,
-                                                           QNet.reward: reward_valid, QNet.state_next: next_state_valid,
-                                                           QNet.done: done_valid,
-                                                           QNet.lr_placeholder: learning_rate,
-                                                           QNet.nprec: noise_precision,
-                                                           QNet.w0_bar_old: w0_bar_old[0], QNet.L0_asym_old: L0_asym_old[0]})
+            grads, loss0, loss1, loss2, loss3, loss_reg, loss, summaries_encodinglayer = sess.run(
+                [QNet.gradients, QNet.loss0, QNet.loss1, QNet.loss2, QNet.loss3, QNet.loss_reg, QNet.loss, QNet.summaries_encodinglayer],
+                feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
+                           QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
+                           QNet.state: state_valid, QNet.action: action_valid,
+                           QNet.reward: reward_valid, QNet.state_next: next_state_valid,
+                           QNet.done: done_valid, QNet.Qmax_target: Qmax_target,
+                           QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
+                           QNet.w0_bar_old: w0_bar_old[0], QNet.L0_asym_old: L0_asym_old[0]})
 
 
             for idx, grad in enumerate(grads): # grad[0] is gradient and grad[1] the variable itself
@@ -390,6 +399,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # update summary
             _, summaries_gradvar = sess.run([QNet.updateModel, QNet.summaries_gradvar], feed_dict=feed_dict)
 
+            summaries_var = sess.run(Qtarget.summaries_var)
+
             loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss', simple_value=(lossBuffer / batch_size))])
             loss0_summary = tf.Summary(value=[tf.Summary.Value(tag='TD_Loss', simple_value=(loss0Buffer / batch_size))])
             loss1_summary = tf.Summary(value=[tf.Summary.Value(tag='TDW_Loss', simple_value=(loss1Buffer/ batch_size))])
@@ -408,6 +419,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             summary_writer.add_summary(lossreg_summary, episode)
             summary_writer.add_summary(reward_summary, episode)
             summary_writer.add_summary(max_height_summary, episode)
+            summary_writer.add_summary(summaries_var, episode)
             summary_writer.add_summary(summaries_gradvar, episode)
             summary_writer.add_summary(summaries_encodinglayer, episode)
             summary_writer.add_summary(learning_rate_summary, episode)
@@ -438,6 +450,20 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             L0_asym_old[0] = L0_asym_old[1]
 
             w0_bar_old[1], L0_asym_old[1] = sess.run([QNet.w0_bar, QNet.L0_asym])
+
+
+        # ===============================================================
+        # update target network
+        if episode % FLAGS.update_freq_target == 0:
+            #
+            vars_modelQ = sess.run(QNet.tvars)
+
+            #
+            feed_dict = dictionary = dict(zip(Qtarget.variable_holders, vars_modelQ))
+
+            #
+            sess.run(Qtarget.copyParams, feed_dict=feed_dict)
+
 
         # ===============================================================
         # save model
