@@ -1,0 +1,30 @@
+#!/bin/bash
+echo "==================="
+python alpaca.py --non_linearity=sigm --hidden_space=64 --latent_space=8
+python alpaca.py --non_linearity=sigm --hidden_space=64 --latent_space=16
+python alpaca.py --non_linearity=sigm --hidden_space=128 --latent_space=8
+python alpaca.py --non_linearity=sigm --hidden_space=128 --latent_space=16
+
+python alpaca.py --non_linearity=sigm --gamma=0.8
+python alpaca.py --non_linearity=sigm --gamma=0.95
+python alpaca.py --non_linearity=sigm --gamma=0.99
+
+python alpaca.py --non_linearity=sigm --learning_rate=2e-2
+python alpaca.py --non_linearity=sigm --learning_rate=5e-2
+
+python alpaca.py --non_linearity=sigm --prior_precision=0.05
+python alpaca.py --non_linearity=sigm --prior_precision=0.5
+
+python alpaca.py --non_linearity=sigm --noise_precision=0.1
+python alpaca.py --non_linearity=sigm --noise_precision=1.0
+python alpaca.py --non_linearity=sigm --noise_precision=5.0
+
+python alpaca.py --non_linearity=sigm --replay_memory_size=8
+python alpaca.py --non_linearity=sigm --replay_memory_size=16
+python alpaca.py --non_linearity=sigm --replay_memory_size=32
+python alpaca.py --non_linearity=sigm --replay_memory_size=64
+python alpaca.py --non_linearity=sigm --replay_memory_size=128
+
+python alpaca.py --non_linearity=sigm --N_tasks=1
+python alpaca.py --non_linearity=sigm --N_tasks=2
+python alpaca.py --non_linearity=sigm --N_tasks=4
