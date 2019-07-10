@@ -30,8 +30,8 @@ tf.flags.DEFINE_float("learning_rate", 1e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
 
-tf.flags.DEFINE_float("noise_precision", 10, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 10, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 20, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
@@ -41,14 +41,16 @@ tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning"
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 2000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 5000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
+
+tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
+tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq_post", 220, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("update_freq_target", 10, "Update frequency of target network")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
@@ -361,11 +363,21 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             next_state_valid = next_state_sample[valid, :]
             done_valid = done_sample[valid]
 
+            # select amax from online network
+            amax_online = sess.run(QNet.max_action,
+                                   feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
+                                              QNet.context_reward: reward_train,
+                                              QNet.context_state_next: next_state_train,
+                                              QNet.state: state_valid, QNet.state_next: next_state_valid,
+                                              QNet.nprec: noise_precision})
+
+
             # evaluate target model
             Qmax_target = sess.run(Qtarget.Qmax,
                 feed_dict={Qtarget.context_state: state_train, Qtarget.context_action: action_train,
                            Qtarget.context_reward: reward_train, Qtarget.context_state_next: next_state_train,
                            Qtarget.state: state_valid, Qtarget.state_next: next_state_valid,
+                           Qtarget.amax_online: amax_online,
                            Qtarget.nprec: noise_precision})
 
             # update model
@@ -376,6 +388,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                            QNet.state: state_valid, QNet.action: action_valid,
                            QNet.reward: reward_valid, QNet.state_next: next_state_valid,
                            QNet.done: done_valid, QNet.Qmax_target: Qmax_target,
+                           QNet.amax_online: amax_online,
                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
                            QNet.w0_bar_old: w0_bar_old[0], QNet.L0_asym_old: L0_asym_old[0]})
 
@@ -460,6 +473,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             #
             feed_dict = dictionary = dict(zip(Qtarget.variable_holders, vars_modelQ))
+            feed_dict.update({Qtarget.tau: FLAGS.tau})
 
             #
             sess.run(Qtarget.copyParams, feed_dict=feed_dict)
@@ -514,7 +528,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 state_train[k] = experience[0]
 
             # figure
-            fig, ax = plt.subplots(ncols=3, figsize=[15, 5])
+            fig, ax = plt.subplots(ncols=5, figsize=[18, 5])
             im = ax[0].imshow(Vmesh.reshape(Npts, Npts), origin='lower', extent=[minp,maxp,-maxs,maxs])
             ax[0].set_aspect((maxp- minp)/(2* maxs))
             cb = fig.colorbar(im, ax=ax[0], shrink=0.74, orientation="horizontal", pad=0.2)
@@ -525,20 +539,22 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             ax[0].set_ylim([-maxs, maxs])
             ax[0].set_xlabel('position')
             ax[0].set_ylabel('velocity')
+            ax[0].title.set_text('Mean')
             ax[0].scatter(state_train[:,0], state_train[:,1], s=5) # [pos, vel]
 
-            im = ax[1].imshow(Vmesh.reshape(Npts, Npts)+ dVmesh.reshape(Npts, Npts), origin='lower', extent=[minp, maxp, -maxs, maxs])
+            im = ax[1].imshow(arg_Qmax.reshape(Npts, Npts), origin='lower', extent=[minp, maxp, -maxs, maxs])
             ax[1].set_aspect((maxp - minp) / (2 * maxs))
-            cb = fig.colorbar(im, ax=ax[1], shrink=0.74, orientation="horizontal", pad=0.2)
-            tick_locator = ticker.MaxNLocator(nbins=4)
+            cb = fig.colorbar(im, ax=ax[1], shrink=0.80, orientation="horizontal", pad=0.2)
+            tick_locator = ticker.MaxNLocator(nbins=3)
             cb.locator = tick_locator
             cb.update_ticks()
             ax[1].set_xlim([minp, maxp])
             ax[1].set_ylim([-maxs, maxs])
             ax[1].set_xlabel('position')
             ax[1].set_ylabel('velocity')
+            ax[1].title.set_text('Max Action')
 
-            im = ax[2].imshow(Vmesh.reshape(Npts, Npts)- dVmesh.reshape(Npts, Npts), origin='lower', extent=[minp, maxp, -maxs, maxs])
+            im = ax[2].imshow(Vmesh.reshape(Npts, Npts)+ dVmesh.reshape(Npts, Npts), origin='lower', extent=[minp, maxp, -maxs, maxs])
             ax[2].set_aspect((maxp - minp) / (2 * maxs))
             cb = fig.colorbar(im, ax=ax[2], shrink=0.74, orientation="horizontal", pad=0.2)
             tick_locator = ticker.MaxNLocator(nbins=4)
@@ -548,6 +564,31 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             ax[2].set_ylim([-maxs, maxs])
             ax[2].set_xlabel('position')
             ax[2].set_ylabel('velocity')
+            ax[2].title.set_text('Mean+ Stdv')
+
+            im = ax[3].imshow(Vmesh.reshape(Npts, Npts)- dVmesh.reshape(Npts, Npts), origin='lower', extent=[minp, maxp, -maxs, maxs])
+            ax[3].set_aspect((maxp - minp) / (2 * maxs))
+            cb = fig.colorbar(im, ax=ax[3], shrink=0.74, orientation="horizontal", pad=0.2)
+            tick_locator = ticker.MaxNLocator(nbins=4)
+            cb.locator = tick_locator
+            cb.update_ticks()
+            ax[3].set_xlim([minp, maxp])
+            ax[3].set_ylim([-maxs, maxs])
+            ax[3].set_xlabel('position')
+            ax[3].set_ylabel('velocity')
+            ax[3].title.set_text('Mean- Stdv')
+
+            im = ax[4].imshow(dVmesh.reshape(Npts, Npts), origin='lower', extent=[minp, maxp, -maxs, maxs])
+            ax[4].set_aspect((maxp - minp) / (2 * maxs))
+            cb = fig.colorbar(im, ax=ax[4], shrink=0.74, orientation="horizontal", pad=0.2)
+            tick_locator = ticker.MaxNLocator(nbins=4)
+            cb.locator = tick_locator
+            cb.update_ticks()
+            ax[4].set_xlim([minp, maxp])
+            ax[4].set_ylim([-maxs, maxs])
+            ax[4].set_xlabel('position')
+            ax[4].set_ylabel('velocity')
+            ax[4].title.set_text('Stdv')
 
             plt.savefig(V0_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
             plt.close()

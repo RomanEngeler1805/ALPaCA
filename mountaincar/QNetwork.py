@@ -77,6 +77,7 @@ class QNetwork():
         ''' constructing tensorflow model '''
         #
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
+        self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
 
         # for kl divergence to change learning dynamics
         self.w0_bar_old = tf.placeholder(tf.float32, shape=[self.latent_dim, 1], name='w0_bar_old')
@@ -169,12 +170,13 @@ class QNetwork():
         # next state ----------------------------------------
         Qnext = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi_next, name='Qnext')
 
-        max_action = tf.one_hot(tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
-        phi_max = tf.reduce_sum(tf.multiply(self.phi_next, max_action), axis=2)
-        phi_max = tf.stop_gradient(phi_max)
+        self.max_action = tf.one_hot(tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
 
         # last factor to account for case that s is terminating state
-        self.Qmax = tf.einsum('im,bi->b', self.wt_bar, phi_max, name='Qmax')
+        self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
+        self.Qmax = tf.einsum('im,bi->b', self.wt_bar, tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2))
+
+
         self.Qmax_target = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')
 
         self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_target)
@@ -185,6 +187,8 @@ class QNetwork():
         self.Qdiff = self.Qtarget - self.Q
 
         # phi_hat* Lt_inv* phi_hat --------------------------
+        phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
+
         self.phi_hat = phi_taken - self.gamma * phi_max
         #self.phi_hat = tf.stop_gradient(self.phi_hat)
         Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat, name='Sigma_pred')+  self.Sigma_e # column vector
@@ -203,7 +207,7 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss1+ self.loss2#+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
+        self.loss = 1./tf.to_float(bs)* (self.loss1+ self.loss2)#+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
@@ -329,6 +333,6 @@ class QNetwork():
         # copy parameters
         update_op = []
         for (v_old, v_new) in zip(self.tvars, self.variable_holders):
-            update_op.append(tf.assign(v_old, v_new))
+            update_op.append(tf.assign(v_old, (1.- self.tau)* v_old+ self.tau* v_new))
 
         return update_op
