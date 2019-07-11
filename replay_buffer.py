@@ -20,8 +20,7 @@ class replay_buffer():
             self.buffer.append(new_experience)
             self.num_experiences += 1
         else:
-            #self.buffer.popleft()
-            self.buffer[0] = []
+            self.buffer.pop(0)
             self.buffer.append(new_experience)
 
     def reset(self):

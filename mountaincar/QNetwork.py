@@ -188,6 +188,7 @@ class QNetwork():
 
         # phi_hat* Lt_inv* phi_hat --------------------------
         phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
+        phi_max = tf.stop_gradient(phi_max)
 
         self.phi_hat = phi_taken - self.gamma * phi_max
         #self.phi_hat = tf.stop_gradient(self.phi_hat)
@@ -207,7 +208,7 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = 1./tf.to_float(bs)* (self.loss1+ self.loss2)#+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
+        self.loss = self.loss1+ self.loss2 #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)

@@ -40,7 +40,15 @@ class MountainCarEnv(gym.Env):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
-    def step(self, action):
+
+    def _sample_env(self):
+        self.force = 0.001#+ 0.00001*np.random.normal()
+
+    def _sample_state(self):
+        self.state = np.array([self.np_random.uniform(low=-0.6, high=-0.4), 0])
+        return np.array(self.state)
+
+    def _step(self, action):
         assert self.action_space.contains(action), "%r (%s) invalid" % (action, type(action))
 
         position, velocity = self.state

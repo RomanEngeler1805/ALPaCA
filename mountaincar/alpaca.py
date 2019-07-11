@@ -14,10 +14,7 @@ from matplotlib import ticker
 import sys
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.25)
-
-np.random.seed(1234)
-tf.set_random_seed(1234)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.15)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
@@ -27,7 +24,7 @@ tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 1e-3, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("lr_drop", 1.0005, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
@@ -55,17 +52,19 @@ tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode"
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
-tf.flags.DEFINE_integer('stop_grad', 0, 'Stop gradients to optimizer L0 for the first N iterations')
+tf.flags.DEFINE_integer("random_seed", 1805, "Random seed for numpy and tensorflow")
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
+
+np.random.seed(FLAGS.random_seed)
+tf.set_random_seed(FLAGS.random_seed)
 
 from mountain_car import MountainCarEnv
 from QNetwork import QNetwork
 
 sys.path.insert(0, './..')
 from replay_buffer import replay_buffer
-
 
 def eGreedyAction(x, epsilon=0.9):
     ''' select next action according to epsilon-greedy algorithm '''
@@ -309,12 +308,15 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         tb = np.vstack(tb)[:,0]
         max_height = np.max(tb)
 
+        # reward in episode
+        reward_episode.append(np.sum(np.array(rw))/ FLAGS.N_tasks)
+
 
         if episode % 1000 == 0:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
         # learning rate schedule
-        if learning_rate > 2e-4:
+        if learning_rate > 3e-4:
             learning_rate /= FLAGS.lr_drop
 
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
