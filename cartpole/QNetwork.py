@@ -188,6 +188,7 @@ class QNetwork():
 
         # phi_hat* Lt_inv* phi_hat --------------------------
         phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
+        phi_max = tf.einsum('b,ba->ba', (tf.ones(bs,) - self.done), phi_max)
         phi_max = tf.stop_gradient(phi_max)
 
         self.phi_hat = phi_taken - self.gamma * phi_max
