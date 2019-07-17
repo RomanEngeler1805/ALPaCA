@@ -12,17 +12,17 @@ import pandas as pd
 import sys
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.23)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.20)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 2, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 4, "Dimensionality of state space")
-tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("hidden_space", 256, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
 tf.flags.DEFINE_float("learning_rate", 1e-3, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.0005, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
 
 tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
@@ -40,11 +40,11 @@ tf.flags.DEFINE_integer("N_episodes", 5000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 400, "Length of episodes")
 
-tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
-tf.flags.DEFINE_integer("update_freq_target", 100, "Update frequency of target network")
+tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
+tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
-tf.flags.DEFINE_integer("update_freq_post", 220, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_integer("update_freq_post", 1000, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
@@ -271,7 +271,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
         # learning rate schedule
-        if learning_rate > 3e-4:
+        if learning_rate > 1e-6:
             learning_rate /= FLAGS.lr_drop
 
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
@@ -307,6 +307,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             train = np.arange(0, split)
             valid = np.arange(split, L_experience)
+            valid = np.random.choice(valid, size=np.int(0.4* len(valid)), replace=False)
 
             state_train = state_sample[train, :]
             action_train = action_sample[train]
@@ -345,7 +346,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                            QNet.state: state_valid, QNet.action: action_valid,
                            QNet.reward: reward_valid, QNet.state_next: next_state_valid,
                            QNet.done: done_valid, QNet.Qmax_target: Qmax_target,
-                           QNet.amax_online: amax_online,
+                           QNet.amax_online: amax_online, QNet.episode: episode,
                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
                            QNet.w0_bar_old: w0_bar_old[0], QNet.L0_asym_old: L0_asym_old[0]})
 
@@ -411,7 +412,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         lossregBuffer *= 0.
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-        if episode < 2:
+        if episode < 6:
             batch_size *= 2
 
         # kl divergence updates

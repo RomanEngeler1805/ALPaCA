@@ -78,7 +78,7 @@ class CartPoleEnv(gym.Env):
             np.finfo(np.float32).max])
 
         self.action_space = spaces.Discrete(2)
-        self.observation_space = spaces.Box(-high, high, dtype=np.float32)
+        self.observation_space = spaces.Box(-high, high)
 
         self.seed()
         self.viewer = None
@@ -86,7 +86,7 @@ class CartPoleEnv(gym.Env):
 
         self.steps_beyond_done = None
 
-    def seed(self, seed=1805):
+    def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 

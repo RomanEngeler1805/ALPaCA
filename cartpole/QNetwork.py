@@ -38,13 +38,9 @@ class QNetwork():
             self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
             hidden1 = self.activation(self.hidden1)
-            self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
-                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
-            hidden2 = self.activation(self.hidden2)
             #hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
-            self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
+            self.hidden3 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden3 = self.activation(self.hidden3)
@@ -78,6 +74,7 @@ class QNetwork():
         #
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
+        self.episode = tf.placeholder(shape=[], dtype=tf.int32, name='episode')
 
         # for kl divergence to change learning dynamics
         self.w0_bar_old = tf.placeholder(tf.float32, shape=[self.latent_dim, 1], name='w0_bar_old')
@@ -158,6 +155,8 @@ class QNetwork():
                                             lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken,
                                                                         self.context_reward),
                                             lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+
+        self.Lt_inv = tf.cond(self.episode%30 < 25, lambda: tf.stop_gradient(self.Lt_inv), lambda: self.Lt_inv)
 
         # sample posterior
         with tf.control_dependencies([self.wt_bar, self.Lt_inv]):
@@ -253,7 +252,7 @@ class QNetwork():
 
         # prior last layer summaries
         hidden1_hist = tf.summary.histogram("hidden1", self.hidden1)
-        hidden2_hist = tf.summary.histogram("hidden2", self.hidden2)
+        #hidden2_hist = tf.summary.histogram("hidden2", self.hidden2)
         hidden3_hist = tf.summary.histogram("hidden3", self.hidden3)
 
         # concat summaries
@@ -261,7 +260,7 @@ class QNetwork():
 
         self.summaries_var = tf.summary.merge(weight_summary)
 
-        self.summaries_encodinglayer = tf.summary.merge([hidden1_hist, hidden2_hist, hidden3_hist])
+        self.summaries_encodinglayer = tf.summary.merge([hidden1_hist, hidden3_hist])
 
 
     def _sample_prior(self):
