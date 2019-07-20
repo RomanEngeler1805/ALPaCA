@@ -38,9 +38,13 @@ class QNetwork():
             self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
             hidden1 = self.activation(self.hidden1)
+            self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
+                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
+            hidden2 = self.activation(self.hidden2)
             #hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
-            self.hidden3 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
+            self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden3 = self.activation(self.hidden3)
@@ -140,6 +144,8 @@ class QNetwork():
         L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
         self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
+        self.Qmean = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qmean')
+
         self.sample_prior = self._sample_prior()
 
         # posterior (analytical update) --------------------------------------------------
@@ -156,14 +162,14 @@ class QNetwork():
                                                                         self.context_reward),
                                             lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
 
-        self.Lt_inv = tf.cond(self.episode%30 < 25, lambda: tf.stop_gradient(self.Lt_inv), lambda: self.Lt_inv)
-
         # sample posterior
         with tf.control_dependencies([self.wt_bar, self.Lt_inv]):
             self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
         # loss function ==================================================================
         # current state -------------------------------------
+
+
         self.Q = tf.einsum('im,bi->b', self.wt_bar, phi_taken, name='Q')
 
         # next state ----------------------------------------
@@ -208,10 +214,10 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss1+ self.loss2 #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
+        self.loss = self.loss1+ self.loss2+ self.regularizer* tf.reduce_sum(tf.math.square(self.L0_asym)) #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
 
         self.tvars = tf.trainable_variables(scope=self.scope)  # [v for v in tf.trainable_variables() if v.name!='QNetwork/L0_asym:0']
 
@@ -252,7 +258,7 @@ class QNetwork():
 
         # prior last layer summaries
         hidden1_hist = tf.summary.histogram("hidden1", self.hidden1)
-        #hidden2_hist = tf.summary.histogram("hidden2", self.hidden2)
+        hidden2_hist = tf.summary.histogram("hidden2", self.hidden2)
         hidden3_hist = tf.summary.histogram("hidden3", self.hidden3)
 
         # concat summaries
@@ -260,7 +266,7 @@ class QNetwork():
 
         self.summaries_var = tf.summary.merge(weight_summary)
 
-        self.summaries_encodinglayer = tf.summary.merge([hidden1_hist, hidden3_hist])
+        self.summaries_encodinglayer = tf.summary.merge([hidden1_hist, hidden2_hist, hidden3_hist])
 
 
     def _sample_prior(self):
