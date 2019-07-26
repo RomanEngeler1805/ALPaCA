@@ -20,7 +20,7 @@ tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 2, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 4, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("latent_space", 4, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
 
 tf.flags.DEFINE_float("learning_rate", 2e-3, "Initial learning rate")
@@ -39,7 +39,7 @@ tf.flags.DEFINE_integer("update_freq_post", 5000, "Update frequency of posterior
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 8000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 600, "Length of episodes")
 
@@ -274,8 +274,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         if learning_rate > 1e-6:
             learning_rate /= FLAGS.lr_drop
 
-        if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
-            noise_precision *= FLAGS.noise_precstep
+        #if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
+        #    noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
             split_ratio = np.min([split_ratio+ 0.01, 0.15])
@@ -375,7 +375,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # reduce summary size
         if episode % 10 == 0:
             # update summary
-            _, summaries_gradvar = sess.run([QNet.updateModel, QNet.summaries_gradvar], feed_dict=feed_dict)
+            _, summaries_gradvar, noise_var = sess.run([QNet.updateModel, QNet.summaries_gradvar, QNet.noise_var], feed_dict=feed_dict)
+
+            noise_precision = 1./noise_var
 
             summaries_var = sess.run(Qtarget.summaries_var)
 
@@ -387,7 +389,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             lossreg_summary = tf.Summary(value=[tf.Summary.Value(tag='Regularization_Loss', simple_value=(lossregBuffer / batch_size))])
             reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw))/(FLAGS.N_tasks))])
             learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
-            noise_summary = tf.Summary(value=[tf.Summary.Value(tag='Noise precision', simple_value=noise_precision)])
+            noise_summary = tf.Summary(value=[tf.Summary.Value(tag='Noise variance', simple_value=noise_var)])
 
             summary_writer.add_summary(loss_summary, episode)
             summary_writer.add_summary(loss0_summary, episode)

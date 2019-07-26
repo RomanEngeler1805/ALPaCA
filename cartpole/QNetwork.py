@@ -132,7 +132,8 @@ class QNetwork():
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
 
         self.Sigma_e_context = 1. / self.nprec * tf.ones(bsc, name='noise_precision')
-        self.Sigma_e = 1. / self.nprec * tf.ones(bs, name='noise_precision')
+        self.noise_var = tf.get_variable(initializer=1./0.1, name='noise_var')
+        self.Sigma_e = self.noise_var * tf.ones(bs, name='noise_precision')
 
         # output layer (Bayesian) =========================================================
         self.wt = tf.get_variable('wt', shape=[self.latent_dim,1], trainable=False)

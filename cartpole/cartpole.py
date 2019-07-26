@@ -92,7 +92,7 @@ class CartPoleEnv(gym.Env):
 
     def _sample_env(self):
         if self.sample_mass:
-            self.masspole = 0.1+ 0.02* np.random.normal()
+            self.masspole = 0.1+ 0.03* np.random.normal()
         else:
             self.masspole = 0.1
 
