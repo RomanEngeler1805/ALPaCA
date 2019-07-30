@@ -84,6 +84,9 @@ class QNetwork():
         self.L0_asym_old = tf.placeholder(tf.float32, shape=[self.latent_dim], name='L0_asym_old')
         self.L0_old = tf.matmul(tf.diag(self.L0_asym_old), tf.diag(self.L0_asym_old))  # \Lambda_0
 
+        #
+        self.episode = tf.placeholder(shape=[], dtype=tf.int32, name='episode')
+
         # placeholders ====================================================================
         ## context data
         self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
@@ -192,7 +195,10 @@ class QNetwork():
         phi_max = tf.stop_gradient(phi_max)
 
         self.phi_hat = phi_taken - self.gamma * phi_max
+
+        #self.phi_hat = tf.cond(self.episode < 1000, lambda: self.phi_hat, lambda: tf.stop_gradient(self.phi_hat))
         #self.phi_hat = tf.stop_gradient(self.phi_hat)
+
         Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat, name='Sigma_pred')+  self.Sigma_e # column vector
         logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred))
 
@@ -209,7 +215,7 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss1+ self.loss2 #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
+        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss3 #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)

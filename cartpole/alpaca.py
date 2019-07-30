@@ -47,7 +47,7 @@ tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("update_freq_post", 220, "Update frequency of posterior and sampling of new policy")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
-tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
+tf.flags.DEFINE_float("regularizer", 0.1, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer("random_seed", 1805, "Random seed for numpy and tensorflow")
@@ -347,6 +347,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                            QNet.done: done_valid, QNet.Qmax_target: Qmax_target,
                            QNet.amax_online: amax_online,
                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
+                           QNet.episode: episode,
                            QNet.w0_bar_old: w0_bar_old[0], QNet.L0_asym_old: L0_asym_old[0]})
 
 
