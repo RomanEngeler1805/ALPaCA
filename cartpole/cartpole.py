@@ -77,8 +77,8 @@ class CartPoleEnv(gym.Env):
             self.theta_threshold_radians * 2,
             np.finfo(np.float32).max])
 
-        self.action_space = spaces.Discrete(2)
-        self.observation_space = spaces.Box(-high, high, dtype=np.float32)
+        self.action_space = spaces.Discrete(4)
+        self.observation_space = spaces.Box(-high, high)
 
         self.seed()
         self.viewer = None
@@ -92,12 +92,12 @@ class CartPoleEnv(gym.Env):
 
     def _sample_env(self):
         if self.sample_mass:
-            self.masspole = 0.1+ 0.01* np.random.normal()
+            self.masspole = 0.1+ 0.03* np.random.normal()
         else:
             self.masspole = 0.1
 
-        if self.sample_mass:
-            self.length = 0.5+ 0.01* np.random.normal()
+        if self.sample_length:
+            self.length = 0.5+ 0.05* np.random.normal()
         else:
             self.length = 0.5
 
@@ -143,7 +143,8 @@ class CartPoleEnv(gym.Env):
         return np.array(self.state), reward, done, {}
 
     def _sample_state(self):
-        self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
+        self.state = np.concatenate((self.np_random.uniform(low=-1., high=1., size=(2,)),
+                                     self.np_random.uniform(low=-0.1, high=0.1, size=(2,))))
         self.steps_beyond_done = None
         return np.array(self.state)
 
