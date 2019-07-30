@@ -49,11 +49,7 @@ tf.flags.DEFINE_integer("update_freq_target", 100, "Update frequency of target n
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
-<<<<<<< HEAD
 tf.flags.DEFINE_float("regularizer", 0.1, "Regularization parameter")
-=======
-tf.flags.DEFINE_float("regularizer", 0.001, "Regularization parameter")
->>>>>>> 0a7d87278bf10ca98e3f2b73319ce43f4b76ccd3
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
