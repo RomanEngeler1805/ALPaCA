@@ -3,7 +3,7 @@ import numpy as np
 class wheel_bandit_environment():
     ''' contextual bandit '''
 
-    def __init__(self, action_space):
+    def __init__(self, action_space, random_seed):
         ''' r(s,a) = theta* phi(s,a) '''
         np.random.seed(1234)
 
@@ -17,13 +17,13 @@ class wheel_bandit_environment():
         self.state = np.random.rand(self.n_dim) # [radius, phase]
 
         # feature
-        self.delta = np.random.rand()
+        self.delta = (0.4+ 0.59*np.random.rand())
         self.mu = np.array([1.2, 1.0, 50.]) # mean values for normal distributions
         self.sigma = 0.01 # standard deviation
 
     def _sample_env(self):
         ''' resample delta '''
-        self.delta = np.random.rand()
+        self.delta = (0.4+ 0.59*np.random.rand())
 
     def _sample_state(self):
         ''' resample state '''
@@ -37,11 +37,11 @@ class wheel_bandit_environment():
         if state[0] > self.delta:
             if  0<= state[1] and state[1] < 0.25:
                 mu_idx = np.array([0, 2, 1, 1, 1])
-            if 0.25 <= state[1] and state[1] < 0.50:
+            elif 0.25 <= state[1] and state[1] < 0.50:
                 mu_idx = np.array([0, 1, 2, 1, 1])
-            if 0.50 <= state[1] and state[1] < 0.75:
+            elif 0.50 <= state[1] and state[1] < 0.75:
                 mu_idx = np.array([0, 1, 1, 2, 1])
-            if 0.75 <= state[1] and state[1] <= 1.00:
+            elif 0.75 <= state[1] and state[1] <= 1.00:
                 mu_idx = np.array([0, 1, 1, 1, 2])
         else:
             mu_idx = np.array([0, 1, 1, 1, 1])

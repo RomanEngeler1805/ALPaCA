@@ -42,7 +42,7 @@ class QNetwork():
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden2 = self.activation(self.hidden2)
-            hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+            #hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
@@ -78,12 +78,14 @@ class QNetwork():
         #
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
-        self.episode = tf.placeholder(shape=[], dtype=tf.int32, name='episode')
 
         # for kl divergence to change learning dynamics
         self.w0_bar_old = tf.placeholder(tf.float32, shape=[self.latent_dim, 1], name='w0_bar_old')
         self.L0_asym_old = tf.placeholder(tf.float32, shape=[self.latent_dim], name='L0_asym_old')
         self.L0_old = tf.matmul(tf.diag(self.L0_asym_old), tf.diag(self.L0_asym_old))  # \Lambda_0
+
+        #
+        self.episode = tf.placeholder(shape=[], dtype=tf.int32, name='episode')
 
         # placeholders ====================================================================
         ## context data
@@ -102,13 +104,6 @@ class QNetwork():
         # latent representation
         self.context_phi = self.model(context_state, context_action_augm)  # latent space
         self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
-
-        #self.context_phi = tf.cond(self.episode % 40 > 30,
-        #                   lambda: self.context_phi,
-        #                   lambda: tf.stop_gradient(self.context_phi))
-        #self.context_phi_next = tf.cond(self.episode % 40 > 30,
-        #                        lambda: self.context_phi_next,
-        #                        lambda: tf.stop_gradient(self.context_phi_next))
 
         self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.context_done = tf.placeholder(shape=[None, 1], dtype=tf.float32, name='done')
@@ -139,21 +134,17 @@ class QNetwork():
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
 
         self.Sigma_e_context = 1. / self.nprec * tf.ones(bsc, name='noise_precision')
-        #self.noise_var = tf.get_variable(initializer=1./0.1, name='noise_var', trainable=True)
         self.Sigma_e = 1. / self.nprec * tf.ones(bs, name='noise_precision')
 
         # output layer (Bayesian) =========================================================
         self.wt = tf.get_variable('wt', shape=[self.latent_dim,1], trainable=False)
+        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
 
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
         self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec)*tf.ones(self.latent_dim)) # cholesky
         L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
         self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
-
-        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')  # XXXXXXXXX
-
-        self.Qmean = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qmean')
 
         self.sample_prior = self._sample_prior()
 
@@ -172,42 +163,43 @@ class QNetwork():
                                             lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
 
         # sample posterior
-        #with tf.control_dependencies([self.wt_bar, self.Lt_inv]):
-        #    self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
+        with tf.control_dependencies([self.wt_bar, self.Lt_inv]):
+            self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
         # loss function ==================================================================
         # current state -------------------------------------
-        self.Q = tf.einsum('im,bi->b', self.wt_bar, phi_taken, name='Q') # XXXXXXXXX
+        self.Q = tf.einsum('im,bi->b', self.wt_bar, phi_taken, name='Q')
 
         # next state ----------------------------------------
-        Qnext = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi_next, name='Qnext') # XXXXXXXXX
+        Qnext = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi_next, name='Qnext')
 
         self.max_action = tf.one_hot(tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
 
         # last factor to account for case that s is terminating state
         self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
-        self.Qmax = tf.einsum('im,bi->b', self.w0_bar, tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2))  # XXXXXXXXX
+        self.Qmax = tf.einsum('im,bi->b', self.wt_bar,
+                              tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2))
 
         self.Qmax_target = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')
 
         self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_target)
-        #self.Qtarget = self.reward + self.gamma * tf.multiply(1- self.done, Qmax)
-        #self.Qtarget = tf.stop_gradient(self.Qtarget)
+        # self.Qtarget = self.reward + self.gamma * tf.multiply(1- self.done, Qmax)
+        # self.Qtarget = tf.stop_gradient(self.Qtarget)
 
         # Q(s',a*)+ r- Q(s,a)
         self.Qdiff = self.Qtarget - self.Q
 
         # phi_hat* Lt_inv* phi_hat --------------------------
         phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
-        phi_max = tf.einsum('b,ba->ba', (tf.ones(bs,) - self.done), phi_max)
+        phi_max = tf.einsum('b,ba->ba', (tf.ones(bs, ) - self.done), phi_max)
         phi_max = tf.stop_gradient(phi_max)
 
         self.phi_hat = phi_taken - self.gamma * phi_max
 
-        #self.phi_hat = tf.cond(self.episode < 1000, lambda: self.phi_hat, lambda: tf.stop_gradient(self.phi_hat))
-        #self.phi_hat = tf.stop_gradient(self.phi_hat)
+        # self.phi_hat = tf.cond(self.episode < 1000, lambda: self.phi_hat, lambda: tf.stop_gradient(self.phi_hat))
+        # self.phi_hat = tf.stop_gradient(self.phi_hat)
 
-        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat, name='Sigma_pred')+  self.Sigma_e # column vector
+        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat, name='Sigma_pred') + self.Sigma_e  # column vector
         logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred))
 
         # loss
@@ -223,10 +215,10 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss0 # self.loss1+ self.loss2#+ self.regularizer* tf.reduce_sum(tf.math.square(self.L0_asym)) #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
+        self.loss = self.loss1+ self.loss2#+ self.regularizer* self.loss3 #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder)
 
         self.tvars = tf.trainable_variables(scope=self.scope)  # [v for v in tf.trainable_variables() if v.name!='QNetwork/L0_asym:0']
 
@@ -238,7 +230,6 @@ class QNetwork():
 
         # symbolic gradient of loss w.r.t. tvars
         self.gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
-        #self.gradients = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gradients]
 
         #
         self.updateModel = self.optimizer.apply_gradients(zip(self.gradient_holders, self.tvars))
