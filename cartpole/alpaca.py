@@ -44,7 +44,7 @@ tf.flags.DEFINE_integer("N_tasks", 4, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 600, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
-tf.flags.DEFINE_integer("update_freq_target", 100, "Update frequency of target network")
+tf.flags.DEFINE_integer("update_freq_target", 50, "Update frequency of target network")
 
 tf.flags.DEFINE_integer("replay_memory_size", 100000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
