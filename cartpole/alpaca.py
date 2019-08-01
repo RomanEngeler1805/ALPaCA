@@ -40,11 +40,11 @@ tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
 tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
-tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
+tf.flags.DEFINE_integer("N_tasks", 4, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 600, "Length of episodes")
 
-tf.flags.DEFINE_float("tau", 0.1, "Update speed of target network")
-tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
+tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
+tf.flags.DEFINE_integer("update_freq_target", 100, "Update frequency of target network")
 
 tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
