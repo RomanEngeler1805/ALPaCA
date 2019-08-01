@@ -85,9 +85,6 @@ class QNetwork():
         self.L0_asym_old = tf.placeholder(tf.float32, shape=[self.latent_dim], name='L0_asym_old')
         self.L0_old = tf.matmul(tf.diag(self.L0_asym_old), tf.diag(self.L0_asym_old))  # \Lambda_0
 
-        #
-        self.episode = tf.placeholder(shape=[], dtype=tf.int32, name='episode')
-
         # placeholders ====================================================================
         ## context data
         self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
@@ -147,13 +144,14 @@ class QNetwork():
 
         # output layer (Bayesian) =========================================================
         self.wt = tf.get_variable('wt', shape=[self.latent_dim,1], trainable=False)
-        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
 
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
         self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec)*tf.ones(self.latent_dim)) # cholesky
         L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
         self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
+
+        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')  # XXXXXXXXX
 
         self.Qmean = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qmean')
 
@@ -174,22 +172,21 @@ class QNetwork():
                                             lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
 
         # sample posterior
-        with tf.control_dependencies([self.wt_bar, self.Lt_inv]):
-            self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
+        #with tf.control_dependencies([self.wt_bar, self.Lt_inv]):
+        #    self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
         # loss function ==================================================================
         # current state -------------------------------------
-        self.Q = tf.einsum('im,bi->b', self.wt_bar, phi_taken, name='Q')
+        self.Q = tf.einsum('im,bi->b', self.wt_bar, phi_taken, name='Q') # XXXXXXXXX
 
         # next state ----------------------------------------
-        Qnext = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi_next, name='Qnext')
+        Qnext = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi_next, name='Qnext') # XXXXXXXXX
 
         self.max_action = tf.one_hot(tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
 
         # last factor to account for case that s is terminating state
         self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
-        self.Qmax = tf.einsum('im,bi->b', self.wt_bar, tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2))
-
+        self.Qmax = tf.einsum('im,bi->b', self.w0_bar, tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2))  # XXXXXXXXX
 
         self.Qmax_target = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')
 
@@ -226,7 +223,7 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss1+ self.loss2#+ self.regularizer* tf.reduce_sum(tf.math.square(self.L0_asym)) #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
+        self.loss = self.loss0 # self.loss1+ self.loss2#+ self.regularizer* tf.reduce_sum(tf.math.square(self.L0_asym)) #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
