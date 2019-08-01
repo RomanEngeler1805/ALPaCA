@@ -40,13 +40,13 @@ tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
 tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
-tf.flags.DEFINE_integer("N_tasks", 4, "Number of tasks")
+tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 600, "Length of episodes")
 
-tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
-tf.flags.DEFINE_integer("update_freq_target", 100, "Update frequency of target network")
+tf.flags.DEFINE_float("tau", 0.1, "Update speed of target network")
+tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
-tf.flags.DEFINE_integer("replay_memory_size", 20000, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.1, "Regularization parameter")
@@ -81,7 +81,8 @@ def eGreedyAction(x, epsilon=0.):
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.3
+eps = 0.9
+
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -272,7 +273,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # -----------------------------------------------------------------------
             # append episode buffer to large buffer
-
             #fullbuffer.add(tempbuffer.buffer)
 
         # reward in episode
@@ -280,6 +280,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         if episode % 1000 == 0:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
+            print(eps)
 
             print(eps)
 
@@ -288,7 +289,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             learning_rate /= FLAGS.lr_drop
 
         if eps > 0.1:
-            eps*= 0.9997
+            eps*= 0.999
 
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
