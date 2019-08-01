@@ -41,7 +41,7 @@ tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
 tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 4, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 600, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 100, "Update frequency of target network")
@@ -81,7 +81,7 @@ def eGreedyAction(x, epsilon=0.):
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.3
+eps = 0.9
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -274,7 +274,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             learning_rate /= FLAGS.lr_drop
 
         if eps > 0.1:
-            eps*= 0.9995
+            eps*= 0.999
 
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
