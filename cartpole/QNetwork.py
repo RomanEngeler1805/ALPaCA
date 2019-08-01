@@ -31,7 +31,7 @@ class QNetwork():
             # build graph
             self._build_model()
 
-    def model(self, x, a):
+    def model(self, x, a, is_training):
         ''' Embedding into latent space '''
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
@@ -48,6 +48,8 @@ class QNetwork():
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden3 = self.activation(self.hidden3)
+
+            #hidden3 = tf.layers.batch_normalization(hidden3, training=is_training)
 
             # single head
             hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
@@ -79,6 +81,7 @@ class QNetwork():
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
         self.episode = tf.placeholder(shape=[], dtype=tf.int32, name='episode')
+        self.is_training = tf.placeholder_with_default(False, (), 'is_training')
 
         # for kl divergence to change learning dynamics
         self.w0_bar_old = tf.placeholder(tf.float32, shape=[self.latent_dim, 1], name='w0_bar_old')
@@ -100,8 +103,8 @@ class QNetwork():
         context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
 
         # latent representation
-        self.context_phi = self.model(context_state, context_action_augm)  # latent space
-        self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
+        self.context_phi = self.model(context_state, context_action_augm, self.is_training)  # latent space
+        self.context_phi_next = self.model(context_state_next, context_action_augm, self.is_training)  # latent space
 
         #self.context_phi = tf.cond(self.episode % 40 > 30,
         #                   lambda: self.context_phi,
@@ -128,8 +131,8 @@ class QNetwork():
         state_next = self.state_trafo(self.state_next, action_augm)
 
         # latent representation
-        self.phi = self.model(state, action_augm) # latent space
-        self.phi_next = self.model(state_next, action_augm)  # latent space
+        self.phi = self.model(state, action_augm, self.is_training) # latent space
+        self.phi_next = self.model(state_next, action_augm, self.is_training)  # latent space
 
         self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
@@ -237,7 +240,9 @@ class QNetwork():
             self.gradient_holders.append(placeholder)
 
         # symbolic gradient of loss w.r.t. tvars
-        self.gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            self.gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
         #self.gradients = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gradients]
 
         #
