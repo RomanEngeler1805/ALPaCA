@@ -33,8 +33,8 @@ tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N step
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 3000, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_float("split_ratio", 0.2, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 30, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
@@ -52,7 +52,7 @@ tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode"
 tf.flags.DEFINE_float("regularizer", 0.001, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
-tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
+tf.flags.DEFINE_integer("random_seed", 1805, "Random seed for numpy and tensorflow")
 tf.flags.DEFINE_integer("sample_mass", 1, "If pole mass is sampled or fixed")
 tf.flags.DEFINE_integer("sample_length", 0, "If pole length is sampled or fixed")
 
@@ -210,6 +210,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # loop steps
             step = 0
 
+            wt_bar = np.array([0, 0])
+
+            #
+            td_error = 0.
+            Qold = 0.
+            rold = 0.
+
             while step < FLAGS.L_episode:
 
                 # take a step
@@ -220,6 +227,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 action = eGreedyAction(Qval, eps)
                 next_state, reward, done, _ = env._step(action)
+
+                #
+                td_error += np.square(Qold- rold- np.max(Qval))
+                Qold = np.argmax(Qval)
+                rold = reward
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
@@ -263,13 +275,14 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # -----------------------------------------------------------------------
             # append episode buffer to large buffer
-            fullbuffer.add(tempbuffer.buffer)
+            fullbuffer.add(td_error/step, tempbuffer.buffer)
 
         # reward in episode
         reward_episode.append(np.sum(np.array(rw))/ FLAGS.N_tasks)
 
         if episode % 1000 == 0:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
+            print(wt_bar.reshape(1,-1))
 
         # learning rate schedule
         if learning_rate > 1e-6:
@@ -285,7 +298,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         for e in range(batch_size):
 
             # sample from larger buffer [s, a, r, s', d] with current experience not yet included
-            experience = fullbuffer.sample(1)
+            #experience = fullbuffer.sample(1)
+
+            experience, idxs, is_weights = fullbuffer.sample(1)
 
             L_experience = len(experience[0])
 
@@ -315,7 +330,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # split in train and validation set
             #train = np.random.choice(np.arange(L_experience), np.int(split_ratio* L_experience), replace=False)  # mixed
             #valid = np.setdiff1d(np.arange(L_experience), train)
-            #valid = np.random.choice(valid, np.min([len(valid), np.int(0.3*L_experience)]), replace=False)
+
+            valid = np.random.choice(valid, np.min([len(valid), np.int(0.3*L_experience)]), replace=False)
 
             state_train = state_sample[train, :]
             action_train = action_sample[train]
@@ -358,6 +374,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
                            QNet.w0_bar_old: w0_bar_old[0], QNet.L0_asym_old: L0_asym_old[0]})
 
+
+            fullbuffer.update(idxs[0], loss0/ len(valid))
+
             for idx, grad in enumerate(grads): # grad[0] is gradient and grad[1] the variable itself
                 gradBuffer[idx] += (grad[0]/ batch_size)
 
@@ -376,6 +395,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         if episode % 10 == 0:
             # update summary
             _, summaries_gradvar = sess.run([QNet.updateModel, QNet.summaries_gradvar], feed_dict=feed_dict)
+
+            #noise_precision = 1./noise_var
+
             summaries_var = sess.run(Qtarget.summaries_var)
 
             loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss', simple_value=(lossBuffer / batch_size))])
@@ -437,6 +459,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         # ===============================================================
         # save model
+
         #if episode > 0 and episode % 1000 == 0:
           # Save a checkpoint
           #log.info('Save model snapshot')
@@ -451,6 +474,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
             print('Learning_rate: ' + str(np.round(learning_rate, 5)) + ', Nprec: ' + str(np.round(noise_precision, 4)) + ', Split ratio: ' + str(np.round(split_ratio, 2)))
+            #print('Buffer size: '+ str(len(fullbuffer.buffer)))
 
             # plot trajectory ----------------------------------------------
             state_train = np.zeros([step, FLAGS.state_space])
@@ -495,6 +519,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                                xacc* np.ones([Npts*Npts, 1]),
                                                polemesh[0].reshape(-1, 1),
                                                polemesh[1].reshape(-1, 1)], axis=1)
+
+
 
                     # value function
                     w0_bar, phi_mesh = sess.run([QNet.w0_bar, QNet.phi], feed_dict={QNet.state: meshgrid, QNet.episode: 0})
@@ -586,6 +612,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             plt.savefig(dV_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
             plt.close()
+
 
             # evaluate on 10 different initial positions with w0_bar
             # loop tasks --------------------------------------------------------------------
