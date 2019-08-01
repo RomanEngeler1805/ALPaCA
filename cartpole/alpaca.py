@@ -220,7 +220,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # take a step
                 Qval = sess.run(QNet.Qout, feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space),
-                                                           QNet.episode: episode})
+                                                           QNet.episode: episode, QNet.is_training: False})
 
                 action = eGreedyAction(Qval, eps)
                 next_state, reward, done, _ = env._step(action)
@@ -352,7 +352,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                               QNet.context_reward: reward_train,
                                               QNet.context_state_next: next_state_train,
                                               QNet.state: state_valid, QNet.state_next: next_state_valid,
-                                              QNet.nprec: noise_precision, QNet.episode: episode})
+                                              QNet.nprec: noise_precision, QNet.episode: episode, QNet.is_training: True})
 
 
             # evaluate target model
@@ -361,7 +361,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                            Qtarget.context_reward: reward_train, Qtarget.context_state_next: next_state_train,
                            Qtarget.state: state_valid, Qtarget.state_next: next_state_valid,
                            Qtarget.amax_online: amax_online, Qtarget.episode: episode,
-                           Qtarget.nprec: noise_precision})
+                           Qtarget.nprec: noise_precision, Qtarget.is_training: False})
 
             # update model
             grads, loss0, loss1, loss2, loss3, loss_reg, loss, summaries_encodinglayer = sess.run(
@@ -371,7 +371,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                            QNet.state: state_valid, QNet.action: action_valid,
                            QNet.reward: reward_valid, QNet.state_next: next_state_valid,
                            QNet.done: done_valid, QNet.Qmax_target: Qmax_target,
-                           QNet.amax_online: amax_online,
+                           QNet.amax_online: amax_online, QNet.is_training: False,
                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
                            QNet.w0_bar_old: w0_bar_old[0], QNet.L0_asym_old: L0_asym_old[0]})
 
@@ -518,7 +518,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
 
                     # value function
-                    w0_bar, phi_mesh = sess.run([QNet.w0_bar, QNet.phi], feed_dict={QNet.state: meshgrid, QNet.episode: 0})
+                    w0_bar, phi_mesh = sess.run([QNet.w0_bar, QNet.phi], feed_dict={QNet.state: meshgrid, QNet.episode: 0, QNet.is_training: False})
                     Qmesh = np.einsum('di,bda->ba', w0_bar, phi_mesh)
                     Vmesh = np.max(Qmesh, axis=1)
 
@@ -544,7 +544,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                        polemesh[1].reshape(-1, 1)], axis=1)
 
             # value function
-            w0_bar, L0, phi_mesh = sess.run([QNet.w0_bar, QNet.L0, QNet.phi], feed_dict={QNet.state: meshgrid, QNet.episode: 0})
+            w0_bar, L0, phi_mesh = sess.run([QNet.w0_bar, QNet.L0, QNet.phi], feed_dict={QNet.state: meshgrid, QNet.episode: 0, QNet.is_training: False})
             Qmesh = np.einsum('di,bda->ba',  w0_bar, phi_mesh)
             dQmesh = np.einsum('bia,ij,bja->ba', phi_mesh, np.linalg.inv(L0), phi_mesh)
 
@@ -624,7 +624,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 while step < FLAGS.L_episode:
                     # take a step
-                    Qval = sess.run([QNet.Qmean], feed_dict={QNet.state: state.reshape(-1, FLAGS.state_space), QNet.episode: 0}) # mean policy
+                    Qval = sess.run([QNet.Qmean], feed_dict={QNet.state: state.reshape(-1, FLAGS.state_space), QNet.episode: 0, QNet.is_training: False}) # mean policy
                     action = eGreedyAction(Qval, eps)
                     next_state, reward, done, _ = env._step(action)
 
