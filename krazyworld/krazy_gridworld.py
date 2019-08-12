@@ -354,7 +354,7 @@ class KrazyGridWorld:
                 elif self.agent.agent_position[0] == tr[1][0] and self.agent.agent_position[1] == tr[1][1]:
                     transport_sq = tr[0]
             if transport_sq is not None:
-                self.agent.agent_position = [transport_sq[0], transport_sq[1]]
+                self.agent.agent_position = np.array([transport_sq[0], transport_sq[1]])
 
     def check_at_ice_square(self):
         if self.game_grid.grid_np[self.agent.agent_position[0], self.agent.agent_position[1]] == self.tile_types.ice:
@@ -367,7 +367,7 @@ class KrazyGridWorld:
             self.simple_image_viewer = SimpleImageViewer()
         im_obs = self.get_img_obs()
         self.simple_image_viewer.imshow(im_obs)
-        time.sleep(0.075)
+        time.sleep(0.3)
 
     def get_state_obs(self):
         grid_np = copy.deepcopy(self.game_grid.grid_np)
@@ -387,9 +387,9 @@ class KrazyGridWorld:
             for _i, _j in [(-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)]:
                 i, j = (_i + x, _j + y)
                 if 0 <= i < self.game_grid.grid_squares_per_row and 0 <= j < self.game_grid.grid_squares_per_row:
-                    neighbors.append([j, i])
+                    neighbors.append(grid_np[j, i]) # neighbors.append([j, i])
                 else:
-                    neighbors.append(None)
+                    neighbors.append(0) # neighbors.append(None)
 
             grid_np = np.array(neighbors)
 

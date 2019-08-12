@@ -12,19 +12,21 @@ import pandas as pd
 import sys
 from matplotlib import ticker
 
+from array2gif import write_gif
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.16)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 4, "Dimensionality of action space")
-tf.flags.DEFINE_integer("state_space", 2, "Dimensionality of state space")
+tf.flags.DEFINE_integer("state_space", 8, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
 
 tf.flags.DEFINE_float("learning_rate", 1e-3, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.005, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("lr_drop", 1.002, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
@@ -39,14 +41,14 @@ tf.flags.DEFINE_integer("update_freq_post", 100, "Update frequency of posterior 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 3000, "Number of episodes")
-tf.flags.DEFINE_integer("N_tasks", 20, "Number of tasks")
+tf.flags.DEFINE_integer("N_episodes", 10000, "Number of episodes")
+tf.flags.DEFINE_integer("N_tasks", 10, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
-tf.flags.DEFINE_integer("replay_memory_size", 500, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 50, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.001, "Regularization parameter")
@@ -60,7 +62,7 @@ FLAGS(sys.argv)
 np.random.seed(FLAGS.random_seed)
 tf.set_random_seed(FLAGS.random_seed)
 
-from kontrived_grid import ContrivedGrid
+from krazy_gridworld import KrazyGridWorld
 from QNetwork import QNetwork
 
 sys.path.insert(0, './..')
@@ -76,12 +78,11 @@ def eGreedyAction(x, epsilon=0.):
 
     return action
 
-
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
 eps = 0.
-alpha = 4.
+alpha = 10.
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -91,7 +92,7 @@ log.setLevel(logging.DEBUG)
 # create formatter and add it to the handlers
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# create file handler which logs even debug messages
+# create file handler which logs debug messages
 logger_dir = './logger/'
 if logger_dir:
     if not os.path.exists(logger_dir):
@@ -129,6 +130,10 @@ states_dir = 'figures/' + time.strftime('%H-%M-%d_%m-%y') + '/states/'
 if not os.path.exists(states_dir):
     os.makedirs(states_dir)
 
+gif_folder = 'figures/' + time.strftime('%H-%M-%d_%m-%y') + '/gif/'
+if not os.path.exists(gif_folder):
+    os.makedirs(gif_folder)
+
 # initialize replay memory and model
 fullbuffer = Memory(FLAGS.replay_memory_size) #replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
 tempbuffer = replay_buffer(FLAGS.L_episode) # buffer for episode
@@ -136,7 +141,7 @@ evalbuffer = replay_buffer(FLAGS.L_episode) # buffer for episode
 log.info('Build Tensorflow Graph')
 
 # initialize environment
-env = ContrivedGrid()
+env = KrazyGridWorld(screen_height=256, one_hot_obs=False, use_local_obs=True)
 
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
@@ -184,8 +189,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     # report mean reward per episode
     reward_episode = []
 
-    state_distribution = np.zeros([7, 14])
-
     # -----------------------------------------------------------------------------------
     # loop episodes
     print("Episodes...")
@@ -199,13 +202,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         rw = []
 
         if episode % 50 == 0:
-            plt.figure()
-            plt.imshow(np.log(state_distribution+1.))
-            plt.savefig(states_dir + 'Epoch_' + str(episode))
-            plt.close()
-
-            state_distribution = np.zeros([7, 14])
-
             print(alpha)
 
         # loop tasks --------------------------------------------------------------------
@@ -217,8 +213,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             #env._sample_env()
 
             # resample state
-            _ = env.reset()
-            state = np.asarray(env.agent_pos_yx)
+            env.reset(reset_agent_start_pos=True, reset_board=True)
+
+            #state = np.concatenate([env.game_grid.grid_np.flatten().copy(), env.agent.agent_position.copy()])
+            state = env.get_state_obs().flatten()
 
             # sample w from prior
             sess.run([QNet.sample_prior])
@@ -233,9 +231,14 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             Qold = 0.
             rold = 0.
 
-            alpha *= 0.9999
+            alpha *= 0.99995
+
+            if episode % 500 == 0 and n == 0:
+                images = []
 
             while step < FLAGS.L_episode:
+                if episode % 500 == 0 and n == 0:
+                    images.append(env.get_img_obs())
 
                 # take a step
                 Qval = sess.run(QNet.Qout, feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space),
@@ -250,9 +253,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     action = np.argmax(Qval)
 
                 _, reward, done, _ = env.step(action)
-                next_state = np.asarray(env.agent_pos_yx)
 
-                state_distribution[env.agent_pos_yx[0], env.agent_pos_yx[1]]+= 1
+                #next_state = np.concatenate([env.game_grid.grid_np.flatten().copy(), env.agent.agent_position.copy()])
+                next_state = env.get_state_obs().flatten()
 
                 #
                 td_error = np.max([td_error, np.square(Qold- rold- np.max(Qval))])
@@ -300,6 +303,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                         QNet.nprec: noise_precision, QNet.episode: episode})
 
                 # -----------------------------------------------------------------------
+            if episode % 500 == 0 and n == 0:
+                write_gif(images, gif_folder+ str(episode), fps=5)
+
             # append episode buffer to large buffer
             fullbuffer.add(td_error, tempbuffer.buffer)
 
@@ -498,97 +504,40 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # print to console
         if episode % FLAGS.save_frequency == 0:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
-
-            for ii in range(13):
-                sdie = np.array([[0, ii]])
-                print('Q-value of dying: '+ str(sess.run(QNet.Qmean, feed_dict={QNet.state: sdie,
-                                                                            QNet.episode: 0, QNet.is_training: False})))
-
             print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
             print('Learning_rate: ' + str(np.round(learning_rate, 5)) + ', Nprec: ' + str(np.round(noise_precision, 4)) + ', Split ratio: ' + str(np.round(split_ratio, 2)))
             #print('Buffer size: '+ str(len(fullbuffer.buffer)))
 
-
-            # plot trajectory ----------------------------------------------
-            state_train = np.zeros([step, FLAGS.state_space])
-            for k, experience in enumerate(tempbuffer.buffer):
-                # [s, a, r, s', a*, d]
-                state_train[k] = experience[0]
-
-            plt.figure()
-            plt.plot(-state_train[:,1], state_train[:,0], marker='o', markersize=4, color='b')
-            plt.xlabel('x')
-            plt.ylabel('y')
-
-            plt.savefig(Vt_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
-            plt.close()
-
-            # plot value function --------------------------------------------
-            fig, ax = plt.subplots(ncols=1, nrows=1, figsize=[8, 8])
-
-            width = 14
-            height = width // 2
-
-            widthgrid = np.arange(0, width)
-            heightgrid = np.arange(0, height)
-
-            mesh = np.meshgrid(widthgrid, heightgrid)
-
-            meshgrid = np.concatenate([mesh[1].reshape(-1, 1),
-                                       mesh[0].reshape(-1, 1)], axis=1)
-
-            # value function
-            w0_bar, phi_mesh = sess.run([QNet.w0_bar, QNet.phi],
-                                        feed_dict={QNet.state: meshgrid,
-                                                   QNet.episode: 0, QNet.is_training: False})
-            Qmesh = np.einsum('di,bda->ba', w0_bar, phi_mesh)
-            Vmesh = np.max(Qmesh, axis=1).reshape(height, width)
-
-            grid = np.zeros((height, width))
-            grid[:,:] = np.nan
-            grid[0][:] = 1
-            for i in range(7 - 1):
-                grid[i][14 // 2] = 1
-            grid[height - 1][width // 2] = 1
-            Vmesh*= grid
-
-            im = ax.imshow(Vmesh, origin='upper')
-            ax.plot(state_train[:,1], state_train[:,0], marker='o', markersize=4, color='b')
-            plt.savefig(V0_dir + 'Epoch_' + str(episode))
-            plt.close()
-
-
-            # evaluate on 10 different initial positions
-            # loop tasks --------------------------------------------------------------------
+            # evaluation --------------------------------------------------
             reward_valid = np.zeros([10])
             evalbuffer.reset()
 
             for n in range(10):
 
                 # resample state
-                _ = env.reset()
-                state = np.asarray(env.agent_pos_yx)
+                env.reset(reset_agent_start_pos=True, reset_board=True)
+
+                state = env.get_state_obs()#np.concatenate([env.game_grid.grid_np.flatten().copy(), env.agent.agent_position.copy()])
+
+                # sample w from prior
+                sess.run([QNet.sample_prior])
 
                 # loop steps
                 step = 0
 
                 while step < FLAGS.L_episode:
-                    # take a step
                     Qval = sess.run(QNet.Qout, feed_dict={QNet.state: state.reshape(-1, FLAGS.state_space),
                                                           QNet.episode: episode})
-
-                    # action = eGreedyAction(Qval, eps)
                     action = np.argmax(Qval)
-
                     _, reward, done, _ = env.step(action)
-                    next_state = np.asarray(env.agent_pos_yx)
-
-                    # actual reward
-                    reward_valid[n] += reward
+                    state = env.get_state_obs()#np.concatenate([env.game_grid.grid_np.flatten().copy(), env.agent.agent_position.copy()])
 
                     # store experience in memory
                     new_experience = [state, action, reward, next_state, done]
                     evalbuffer.add(new_experience)
+
+                    # actual reward
+                    reward_valid[n] += reward
 
                     # update state, and counters
                     state = next_state.copy()
@@ -616,18 +565,41 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                             done_train[k] = experience[4]
 
                         # update
-                        _, wt_bar = sess.run([QNet.sample_post, QNet.wt_bar],
-                                             feed_dict={QNet.context_state: state_train,
-                                                        QNet.context_action: action_train,
-                                                        QNet.context_reward: reward_train,
-                                                        QNet.context_state_next: next_state_train,
-                                                        QNet.context_done: done_train,
-                                                        QNet.nprec: noise_precision, QNet.episode: episode})
+                        _ = sess.run([QNet.sample_post],
+                                    feed_dict={QNet.context_state: state_train,
+                                                QNet.context_action: action_train,
+                                                QNet.context_reward: reward_train,
+                                                QNet.context_state_next: next_state_train,
+                                                QNet.context_done: done_train,
+                                                QNet.nprec: noise_precision, QNet.episode: episode})
 
             valid_reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation Reward', simple_value=np.mean(reward_valid))])
             summary_writer.add_summary(valid_reward_summary, episode)
-            summary_writer.flush()
 
+            # random policy
+            # evaluation --------------------------------------------------
+            reward_valid = np.zeros([10])
+
+            for n in range(10):
+                # resample state
+                env.reset(reset_agent_start_pos=True, reset_board=True)
+                # loop steps
+                step = 0
+
+                while step < FLAGS.L_episode:
+                    action = np.random.randint(4)
+                    _, reward, done, _ = env.step(action)
+
+                    # actual reward
+                    reward_valid[n] += reward
+                    step += 1
+                    if done == 1:
+                        break
+
+            uniform_reward_summary = tf.Summary(
+                value=[tf.Summary.Value(tag='Uniform Reward', simple_value=np.mean(reward_valid))])
+            summary_writer.add_summary(uniform_reward_summary, episode)
+            summary_writer.flush()
 
         if episode % 1000 == 0:
             log.info('Episode %3.d with time per episode %5.2f', episode, (time.time()- start))
