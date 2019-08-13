@@ -1,6 +1,0 @@
-#!/bin/bash
-echo "==================="
-for reg in 0.01 0.1 1.0
-do
-	python alpaca.py --regularizer $reg --random_seed=1234
-done
