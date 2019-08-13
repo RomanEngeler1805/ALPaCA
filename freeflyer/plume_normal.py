@@ -238,12 +238,20 @@ class PlumeEnv(gym.Env):
     def get_ob_sample(self):
         #currently setting random state, not doing trajs
         z = self.observation_space.sample()
+        '''
         z[0] = np.random.uniform(-10,10)
         z[1] = np.random.uniform(-10,10)
         z[2] = np.random.randn()
         z[3] = np.random.uniform(-0.5,0.5)
-        z[4] = np.random.uniform(-0.5,0.5)
+        z[4] = np.random.uniform(-0.5,0.5) 
         z[5] = np.random.uniform(-0.1,0.1)
+        '''
+        z[0] = np.random.uniform(-10, 10)
+        z[1] = np.random.uniform(-10, 10)
+        z[2] = np.random.randn()
+        z[3] = 0.
+        z[4] = 0.
+        z[5] = 0.
         
         noise_ampl = 0.2
         z[6] = z[0] + np.cos(z[2]) * self.offset_distance + np.random.randn() * noise_ampl #xo
@@ -631,6 +639,10 @@ class PlumeEnv(gym.Env):
             self.state = self.start_state.copy()
         
         return self._get_obs(self.state)
+
+    def set_goal(self, goal_state=np.zeros(12)):
+        self.goal_state = goal_state
+        pass
 
     def render(self, mode='human', close=False):
         from gym.envs.classic_control import rendering
