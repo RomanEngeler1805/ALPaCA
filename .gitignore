@@ -2,6 +2,7 @@ mountain_car/figures
 *.pyc
 *.idea
 run_simulations*
+run_simulations2
 */figures
 */logger
 */summaries
