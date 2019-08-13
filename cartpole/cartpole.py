@@ -101,11 +101,19 @@ class CartPoleEnv(gym.Env):
         else:
             self.length = 0.5
 
+        self.force_mag *= (1- 2*np.random.randint(0, 2))
+
     def _step(self, action):
         assert self.action_space.contains(action), "%r (%s) invalid"%(action, type(action))
         state = self.state
         x, x_dot, theta, theta_dot = state
-        force = self.force_mag if action==1 else -self.force_mag
+        if action == 1:
+            force = self.force_mag
+        elif action == 2:
+            force = -self.force_mag
+        else:
+            force = 0.
+        #force = self.force_mag if action==1 else  -self.force_mag
         costheta = math.cos(theta)
         sintheta = math.sin(theta)
         temp = (force + self.polemass_length * theta_dot * theta_dot * sintheta) / self.total_mass
@@ -130,6 +138,7 @@ class CartPoleEnv(gym.Env):
 
         if not done:
             reward = 1.0
+            #reward = np.abs(theta- self.theta_threshold_radians)/ self.theta_threshold_radians
         elif self.steps_beyond_done is None:
             # Pole just fell!
             self.steps_beyond_done = 0

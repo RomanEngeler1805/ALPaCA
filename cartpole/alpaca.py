@@ -13,28 +13,28 @@ import sys
 from matplotlib import ticker
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.23)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.17)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 2, "Dimensionality of action space")
+tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 4, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("latent_space", 4, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
 
 tf.flags.DEFINE_float("learning_rate", 2e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.002, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.2, "Initial split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 30, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_float("split_ratio", 0.02, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 5, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
@@ -53,7 +53,7 @@ tf.flags.DEFINE_float("regularizer", 0.001, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
-tf.flags.DEFINE_integer("sample_mass", 1, "If pole mass is sampled or fixed")
+tf.flags.DEFINE_integer("sample_mass", 0, "If pole mass is sampled or fixed")
 tf.flags.DEFINE_integer("sample_length", 0, "If pole length is sampled or fixed")
 
 FLAGS = tf.flags.FLAGS
@@ -127,7 +127,7 @@ if not os.path.exists(dV_dir):
     os.makedirs(dV_dir)
 
 # initialize replay memory and model
-fullbuffer = Memory(FLAGS.replay_memory_size) #replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
+fullbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
 tempbuffer = replay_buffer(FLAGS.L_episode) # buffer for episode
 log.info('Build Tensorflow Graph')
 
@@ -270,7 +270,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # -----------------------------------------------------------------------
             # append episode buffer to large buffer
-            fullbuffer.add(td_error/step, tempbuffer.buffer)
+            fullbuffer.add(tempbuffer.buffer)
 
         # reward in episode
         reward_episode.append(np.sum(np.array(rw))/ FLAGS.N_tasks)
@@ -294,7 +294,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # sample from larger buffer [s, a, r, s', d] with current experience not yet included
             #experience = fullbuffer.sample(1)
 
-            experience, idxs, is_weights = fullbuffer.sample(1)
+            experience = fullbuffer.sample(1)
 
             L_experience = len(experience[0])
 
@@ -368,7 +368,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                            QNet.w0_bar_old: w0_bar_old[0], QNet.L0_asym_old: L0_asym_old[0]})
 
 
-            fullbuffer.update(idxs[0], loss0/ len(valid))
+            #fullbuffer.update(idxs[0], loss0/ len(valid))
 
             for idx, grad in enumerate(grads): # grad[0] is gradient and grad[1] the variable itself
                 gradBuffer[idx] += (grad[0]/ batch_size)

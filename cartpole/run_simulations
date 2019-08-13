@@ -2,26 +2,16 @@
 echo "==================="
 random_seed1=1234
 random_seed2=2345
-for tau in 0.1 0.01 0.001
+for latent in 2 4 8
 do
-	for prior in 0.01 0.1 0.5
+	for prior in 0.01 0.5
 	do
 		for noise in 0.01 0.1 0.5
 		do
-			python alpaca.py --tau=$tau --prior_precision=$prior --noise_precision=$noise --random_seed=$random_seed1 &
+			python alpaca.py --latent_space=$latent --prior_precision=$prior --noise_precision=$noise --random_seed=$random_seed1 &
 			sleep 1m
-			python alpaca.py --tau=$tau --prior_precision=$prior --noise_precision=$noise --random_seed=$random_seed2
+			python alpaca.py --latent_space=$latent --prior_precision=$prior --noise_precision=$noise --random_seed=$random_seed2
 			wait
 		done
-	done
-done
-for split_ratio in 0.1 0.3 0.5
-do
-	for update_freq_post in 10 30 50
-	do
-		python alpaca.py --split_ratio=$split_ratio --update_freq_post=$update_freq_post --random_seed=$random_seed1 &
-        	sleep 1m
-        	python alpaca.py --split_ratio=$split_ratio --update_freq_post=$update_freq_post --random_seed=$random_seed2
-        	wait
 	done
 done
