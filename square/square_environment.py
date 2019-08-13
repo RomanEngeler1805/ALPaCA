@@ -5,35 +5,32 @@ class square_environment():
 
     def __init__(self, state_space):
         # size of square
-        self.size = state_space
+        self.size = 5
 
         # initialize agent
-        self.state = np.zeros([self.size, self.size])
-        self.state[(self.size-1)/2, (self.size-1)/2] = 1
+        self.state = np.array([(self.size-1)/2, (self.size-1)/2])
 
         # termination flag
         self.d = 0
 
         # initialize target
-        target_x = (self.size-1) * np.random.randint(0, 2)
-        target_y = 2 # (self.size-1) * np.random.randint(0, 2)
-        self.target = np.array([target_x, target_y])
+        target_y = (self.size-1) * np.random.randint(0, 2)
+        target_x = 2 # (self.size-1) * np.random.randint(0, 2)
+        self.target = np.array([target_y, target_x])
 
     def _sample_env(self):
         ''' resample delta '''
-        target_x = (self.size - 1) * np.random.randint(0, 2)
-        target_y = 2  # (self.size-1) * np.random.randint(0, 2)
-        self.target = np.array([target_x, target_y])
+        target_y = (self.size - 1) * np.random.randint(0, 2)
+        target_x = 2  # (self.size-1) * np.random.randint(0, 2)
+        self.target = np.array([target_y, target_x])
 
     def _sample_state(self):
-        self.state = np.zeros([self.size, self.size])
-        self.state[(self.size - 1) / 2, (self.size - 1) / 2] = 1
+        self.state = np.array([(self.size-1)/2, (self.size-1)/2])
         return self.state.flatten()
 
     def reward(self):
         ''' reward function '''
-        target_x, target_y = self.target
-        if self.state[target_x,target_y] == 1:
+        if self.state[0] == self.target[0] and self.state[1] == self.target[1]:
             return 1
         else:
             return -0.1
@@ -47,10 +44,6 @@ class square_environment():
         '''
         interact with environment and return observation [s', r, d]
         '''
-
-        # update position
-        posx, posy = np.where(self.state == 1)
-
         # update termination flag
         d = 0
 
@@ -76,12 +69,10 @@ class square_environment():
         '''
 
         if not d:
-            if action == 1 and posx != self.size-1: # left
-                self.state[posx, posy] = 0
-                self.state[posx + 1, posy] = 1
-            if action == 2 and posx != 0: # down
-                self.state[posx, posy] = 0
-                self.state[posx - 1, posy] = 1
+            if action == 1 and self.state[0] != self.size-1: # down
+                self.state[0]+= 1
+            if action == 2 and self.state[0] != 0: # up
+                self.state[0] -= 1
 
         # stack observation
         obs = np.array([self.state.flatten(), r, d])
