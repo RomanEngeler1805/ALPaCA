@@ -160,7 +160,7 @@ class ContrivedGrid(gym.Env):
 
     def get_reward(self):
         if self.grid[self.agent_pos_yx[0]][self.agent_pos_yx[1]] == 2:
-            return 1.
+            return 10.
         return 0
 
 
