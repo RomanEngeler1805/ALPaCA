@@ -139,10 +139,25 @@ class QNetwork():
         # Q(s',a*)+ r- Q(s,a)
         self.Qdiff = self.Qtarget - self.Q
 
+        # predictive covariance
+        phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
+        phi_max = tf.einsum('b,ba->ba', (tf.ones(bs, ) - self.done), phi_max)
+        phi_max = tf.stop_gradient(phi_max)
+
+        self.phi_hat = phi_taken - self.gamma * phi_max
+
+        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, tf.linalg.inv(self.L0), self.phi_hat,
+                               name='Sigma_pred') + self.Sigma_e  # column vector
+        logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred))
+
+
         # loss
         self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
+        self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff,
+                               name='loss')
+        self.loss2 = logdet_Sigma
 
-        self.loss = self.loss0
+        self.loss = self.loss1+ self.loss2
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)

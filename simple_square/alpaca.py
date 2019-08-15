@@ -310,7 +310,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 [QNet.gradients, QNet.loss],
                 feed_dict={QNet.state: state_sample, QNet.action: action_sample,
                            QNet.reward: reward_sample, QNet.state_next: next_state_sample,
-                           QNet.done: done_sample,
+                           QNet.done: done_sample, QNet.cprec: cprec,
                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
                            QNet.Qmax_target: Qmax_target, QNet.amax_online: amax_online})
 
