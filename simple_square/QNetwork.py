@@ -79,7 +79,7 @@ class QNetwork():
         #
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
-        self.cprec = tf.placeholder(shape=[], dtype=tf.float32, name='cprec')
+        #self.cprec = tf.placeholder(shape=[], dtype=tf.float32, name='cprec')
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
 
         # placeholders context data =======================================================
@@ -126,7 +126,7 @@ class QNetwork():
         # output layer (Bayesian) =========================================================
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
-        self.L0_asym = tf.sqrt(self.cprec) * tf.ones(self.latent_dim) #tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
+        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
         L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
         self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 

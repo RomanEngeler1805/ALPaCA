@@ -214,7 +214,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             state = env._sample_state().copy()
 
             # sample w from prior
-            sess.run([QNet.sample_prior], feed_dict={QNet.cprec: cprec})
+            sess.run([QNet.sample_prior])
 
             # loop steps
             step = 0
@@ -339,14 +339,14 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                             QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                             QNet.state: state_valid, QNet.state_next: next_state_valid,
-                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision, QNet.cprec: cprec})
+                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision})
 
             # evaluate target model
             Qmax_target = sess.run(Qtarget.Qmax,
                 feed_dict={Qtarget.context_state: state_train, Qtarget.context_action: action_train,
                            Qtarget.context_reward: reward_train, Qtarget.context_state_next: next_state_train,
                            Qtarget.state: state_valid, Qtarget.state_next: next_state_valid,
-                           Qtarget.lr_placeholder: learning_rate, Qtarget.nprec: noise_precision, Qtarget.cprec: cprec,
+                           Qtarget.lr_placeholder: learning_rate, Qtarget.nprec: noise_precision,
                            Qtarget.amax_online: amax_online})
 
             # update model
@@ -356,8 +356,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                            QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                            QNet.state: state_valid, QNet.action: action_valid,
                            QNet.reward: reward_valid, QNet.state_next: next_state_valid,
-                           QNet.done: done_valid, QNet.cprec: cprec,
-                           QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision, QNet.cprec: cprec,
+                           QNet.done: done_valid,
+                           QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
                            QNet.Qmax_target: Qmax_target, QNet.amax_online: amax_online})
 
 
@@ -435,14 +435,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 # resample state
                 state = env._sample_state().copy()
                 # sample w from prior
-                sess.run([QNet.sample_prior], feed_dict={QNet.cprec: cprec})
+                sess.run([QNet.sample_prior])
                 # loop steps
                 step = 0
 
                 while step < FLAGS.L_episode:
                     # take a step
-                    Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space),
-                                                            QNet.cprec: cprec})
+                    Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
                     action = eGreedyAction(Qval, eps)
                     next_state, reward, done = env._step(action)
 
@@ -472,7 +471,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                  feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                                             QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                             QNet.context_done: done_train,
-                                            QNet.nprec: noise_precision, QNet.cprec: cprec})
+                                            QNet.nprec: noise_precision})
 
                     # update state, and counters
                     state = next_state.copy()
