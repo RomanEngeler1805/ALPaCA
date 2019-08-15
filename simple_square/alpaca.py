@@ -222,7 +222,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
                 tempbuffer.add(new_experience)
-                fullbuffer.add(new_experience)
 
                 # actual reward
                 rw.append(reward)
@@ -260,7 +259,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 # -----------------------------------------------------------------------
 
             # append episode buffer to large buffer
-            #fullbuffer.add(tempbuffer.buffer)
+            fullbuffer.add(tempbuffer.buffer)
 
         # append reward
         reward_episode.append(np.sum(np.array(rw)))
@@ -273,17 +272,16 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         for e in range(batch_size):
 
             # sample from larger buffer [s, a, r, s', d] with current experience not yet included
-            Lepisode = 20
-            experience = fullbuffer.sample(Lepisode)
+            experience = fullbuffer.sample(1)
 
-            state_sample = np.zeros((Lepisode, FLAGS.state_space))
-            action_sample = np.zeros((Lepisode,))
-            reward_sample = np.zeros((Lepisode,))
-            next_state_sample = np.zeros((Lepisode, FLAGS.state_space))
-            done_sample = np.zeros((Lepisode,))
+            state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
+            action_sample = np.zeros((FLAGS.L_episode,))
+            reward_sample = np.zeros((FLAGS.L_episode,))
+            next_state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
+            done_sample = np.zeros((FLAGS.L_episode,))
 
             # fill arrays
-            for k, (s0, a, r, s1, d) in enumerate(experience):
+            for k, (s0, a, r, s1, d) in enumerate(experience[0]):
                 state_sample[k] = s0
                 action_sample[k] = a
                 reward_sample[k] = r
