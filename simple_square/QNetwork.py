@@ -133,8 +133,6 @@ class QNetwork():
         self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
         self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
 
-        self.sample_prior = self._sample_prior()
-
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
         self.context_phi_taken = tf.reduce_sum(tf.multiply(self.context_phi, context_taken_action), axis=2)
@@ -147,6 +145,9 @@ class QNetwork():
                                            lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken,
                                                                        self.context_reward),
                                            lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+
+        self.sample_prior = self._sample_prior()
+        self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
         # loss function ==================================================================
         # current state -------------------------------------
@@ -212,6 +213,11 @@ class QNetwork():
     def _sample_prior(self):
         ''' sample wt from prior '''
         update_op = tf.assign(self.wt, self._sample_MN(self.w0_bar, tf.matrix_inverse(self.L0)))
+        return update_op
+
+    def _sample_posterior(self, wt_bar, Lt_inv):
+        ''' sample wt from posterior '''
+        update_op = tf.assign(self.wt, self._sample_MN(wt_bar, Lt_inv))
         return update_op
 
     def _sample_MN(self, mu, cov):
