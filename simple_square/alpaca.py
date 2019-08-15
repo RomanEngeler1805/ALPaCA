@@ -19,7 +19,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.16)
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
-tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
+tf.flags.DEFINE_integer("state_space", 11, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
@@ -44,6 +44,7 @@ tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 100, "Update frequency of target network")
 
 tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
+tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
@@ -288,28 +289,36 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 next_state_sample[k] = s1
                 done_sample[k] = d
 
+            state_train = np.zeros((0, FLAGS.state_space))
+            action_train = np.zeros((0,))
+            reward_train = np.zeros((0,))
+            next_state_train = np.zeros((0, FLAGS.state_space))
+            done_train = np.zeros((0,))
+
             # select amax from online network
             amax_online = sess.run(QNet.max_action,
-                feed_dict={QNet.state: state_sample, QNet.action: action_sample,
-                           QNet.reward: reward_sample, QNet.state_next: next_state_sample,
-                           QNet.done: done_sample,
-                           QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision})
+                feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
+                            QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
+                            QNet.state: state_sample, QNet.state_next: next_state_sample,
+                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision, QNet.cprec: cprec})
 
             # evaluate target model
             Qmax_target = sess.run(Qtarget.Qmax,
-                feed_dict={Qtarget.state: state_sample, Qtarget.action: action_sample,
-                           Qtarget.reward: reward_sample, Qtarget.state_next: next_state_sample,
-                           Qtarget.done: done_sample,
-                           Qtarget.lr_placeholder: learning_rate, Qtarget.nprec: noise_precision,
+                feed_dict={Qtarget.context_state: state_train, Qtarget.context_action: action_train,
+                           Qtarget.context_reward: reward_train, Qtarget.context_state_next: next_state_train,
+                           Qtarget.state: state_sample, Qtarget.state_next: next_state_sample,
+                           Qtarget.lr_placeholder: learning_rate, Qtarget.nprec: noise_precision, Qtarget.cprec: cprec,
                            Qtarget.amax_online: amax_online})
 
             # update model
             grads, loss0 = sess.run(
                 [QNet.gradients, QNet.loss],
-                feed_dict={QNet.state: state_sample, QNet.action: action_sample,
+                feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
+                           QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
+                           QNet.state: state_sample, QNet.action: action_sample,
                            QNet.reward: reward_sample, QNet.state_next: next_state_sample,
                            QNet.done: done_sample, QNet.cprec: cprec,
-                           QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
+                           QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision, QNet.cprec: cprec,
                            QNet.Qmax_target: Qmax_target, QNet.amax_online: amax_online})
 
 
