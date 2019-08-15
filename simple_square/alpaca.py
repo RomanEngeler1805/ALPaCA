@@ -90,7 +90,8 @@ def plot_Valuefcn(Valuefcn, target, save_path, states=np.array([])):
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.9
+eps = 0.
+cprec = 0.1
 
 # get TF logger --------------------------------------------------------------------------
 log = logging.getLogger('Train')
@@ -185,9 +186,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     for episode in range(FLAGS.N_episodes):
 
         eps = np.max([0.1, eps* 0.999])
+        cprec  = np.min([10, cprec* 1.003])
 
         if episode % 500 == 0:
             print(eps)
+            print(cprec)
 
         # count reward
         rw = []
@@ -202,6 +205,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # resample state
             state = env._sample_state().copy()
+
+            # sample w from prior
+            sess.run([QNet.sample_prior], feed_dict={QNet.cprec: cprec})
 
             # loop steps
             step = 0

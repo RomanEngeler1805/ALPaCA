@@ -78,6 +78,8 @@ class QNetwork():
         #
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
+        self.cprec = tf.placeholder(shape=[], dtype=tf.float32, name='cprec')
+        self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
 
         # placeholders ====================================================================
         ## prediction data
@@ -100,14 +102,20 @@ class QNetwork():
         self.reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
 
         # noise variance
-        self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
-
         self.Sigma_e = 1. / self.nprec * tf.ones(bs, name='noise_precision')
 
         # output layer (Bayesian) =========================================================
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
-        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
+        self.L0_asym = tf.sqrt(self.cprec) * tf.ones(self.latent_dim) #tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
+        L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
+        self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
+
+        self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
+
+        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
+
+        self.sample_prior = self._sample_prior()
 
         # posterior (analytical update) --------------------------------------------------
         taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
@@ -162,6 +170,19 @@ class QNetwork():
 
         self.copyParams = self.copy_params()
 
+    def _sample_prior(self):
+        ''' sample wt from prior '''
+        update_op = tf.assign(self.wt, self._sample_MN(self.w0_bar, tf.matrix_inverse(self.L0)))
+        return update_op
+
+    def _sample_MN(self, mu, cov):
+        ''' sample from multi-variate normal '''
+        #A = tf.linalg.cholesky(cov)
+        V, U = tf.linalg.eigh(cov)
+        z = tf.random_normal(shape=[self.latent_dim,1])
+        #x = mu + tf.matmul(A, z)
+        x = mu+ tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
+        return x
 
     def copy_params(self):
         # copy parameters
