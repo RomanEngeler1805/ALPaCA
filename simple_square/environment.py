@@ -1,7 +1,7 @@
 import numpy as np
 
 class environment():
-    ''' 7x1 square environment with reward sampled at random in corners '''
+    ''' Grid wold consisting of N squares with reward sampled at random in corners '''
 
     def __init__(self, state_space):
         # size of square

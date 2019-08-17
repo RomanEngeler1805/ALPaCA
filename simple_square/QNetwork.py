@@ -81,6 +81,7 @@ class QNetwork():
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
         #self.cprec = tf.placeholder(shape=[], dtype=tf.float32, name='cprec')
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
+        self.is_online = tf.placeholder_with_default(False, shape=[], name='is_online')
 
         # placeholders context data =======================================================
         self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
@@ -180,9 +181,14 @@ class QNetwork():
         # loss
         self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
         self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
+
+        sigma_pred_inv = tf.linalg.inv(tf.sqrt(tf.linalg.diag(Sigma_pred)))
+        labels = tf.matmul(sigma_pred_inv, tf.reshape(self.Qtarget, [-1,1]))#tf.einsum('i,ik->k', self.Qtarget, tf.sqrt(sigma_pred_inv))
+        predictions = tf.matmul(sigma_pred_inv, tf.reshape(self.Q, [-1,1]))#tf.einsum('i,ik->k', self.Q, tf.sqrt(sigma_pred_inv))
+
         self.loss2 = logdet_Sigma
 
-        self.loss = self.loss1+ self.loss2
+        self.loss = tf.losses.huber_loss(labels, predictions, delta=100.)+ self.loss2
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
@@ -210,6 +216,24 @@ class QNetwork():
 
         self.copyParams = self.copy_params()
 
+        # summaries ========================================================================
+        variables_names = [v.name for v in tf.trainable_variables()]
+
+        # Keep track of gradient values
+        grad_summaries = []
+        for idx, var in zip(variables_names, self.gradient_holders):
+            grad_hist_summary = tf.summary.histogram("/grad/hist/%s" % idx, var)
+            grad_summaries.append(grad_hist_summary)
+
+        # keep track of weights
+        weight_summary = []
+        for idx, var in zip(variables_names, self.tvars):
+            weight_hist_summary = tf.summary.histogram("/weight/hist/%s" % idx, var)
+            weight_summary.append(weight_hist_summary)
+
+        # concat summaries
+        self.summaries_gradvar = tf.summary.merge([grad_summaries, weight_summary])
+
     def _sample_prior(self):
         ''' sample wt from prior '''
         update_op = tf.assign(self.wt, self._sample_MN(self.w0_bar, tf.matrix_inverse(self.L0)))
@@ -234,10 +258,15 @@ class QNetwork():
         # I've done that differently than outlined in the write-up
         # since I don't like to put the noise variance inside the prior
         Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context)) # noise precision
-        Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0 # posterior precision
+        Lt = tf.cond(self.is_online,
+                     lambda: tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0,
+                     lambda: tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0)
         Lt_inv = tf.linalg.inv(Lt) # posterior variance
-        wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
-                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
+        wt_unnormalized = tf.cond(self.is_online,
+                     lambda:tf.matmul(self.L0, self.w0_bar) + \
+                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1]))),
+                     lambda: tf.matmul(self.L0, self.w0_bar) + \
+                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1]))))
         wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean
 
         return wt_bar, Lt_inv
