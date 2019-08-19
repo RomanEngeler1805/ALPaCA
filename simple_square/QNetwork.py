@@ -209,7 +209,7 @@ class QNetwork():
 
         self.loss2 = logdet_Sigma
 
-        self.loss = self.loss1+ self.loss2
+        self.loss = tf.losses.huber_loss(labels, predictions, delta=100.)+ self.loss2
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
