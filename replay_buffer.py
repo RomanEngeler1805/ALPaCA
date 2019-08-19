@@ -1,5 +1,6 @@
 from collections import deque
 import random
+import numpy as np
 
 class replay_buffer():
     def __init__(self, buffer_size):
@@ -11,16 +12,29 @@ class replay_buffer():
     def sample(self, batch_size):
         ''' sample new batch from replay buffer '''
         # random draw N
-        random.seed()
-        return random.sample(self.buffer, batch_size)
+        #random.seed()
+        idxs = np.random.choice(self.num_experiences, batch_size)
+
+        return_buff = []
+        for i in range(batch_size):
+            return_buff.append(self.buffer[idxs[i]])
+        return idxs, return_buff
+
+        #return idxs, self.buffer[idxs]#random.sample(self.buffer, batch_size)
+
+    def update(self, idxs, buff):
+        #for i, idx in enumerate(idxs):
+        #    self.buffer[idx] = buff[i]
+
+        pass
 
     def add(self, new_experience):
         ''' add new experience to replay buffer '''
         if self.num_experiences < self.buffer_size:
             self.buffer.append(new_experience)
-            #self.num_experiences += 1
+            self.num_experiences += 1
         else:
-            '''
+
             pop_idx = 0#(np.random.geometric(0.005)-1)% self.buffer_size
             self.buffer.pop(pop_idx)
             self.buffer.append(new_experience)
@@ -32,6 +46,7 @@ class replay_buffer():
                 self.buffer.append(new_experience)
 
         self.num_experiences += 1
+        '''
 
     def reset(self):
         self.buffer = [] #.clear()

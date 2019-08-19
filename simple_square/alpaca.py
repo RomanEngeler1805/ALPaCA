@@ -19,7 +19,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.16)
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
-tf.flags.DEFINE_integer("state_space", 11, "Dimensionality of state space")
+tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
@@ -28,13 +28,13 @@ tf.flags.DEFINE_float("learning_rate", 3e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.0001, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.5, "Noise precision (1/var)") # increase
+tf.flags.DEFINE_float("noise_precision", 10., "Noise precision (1/var)") # increase
 tf.flags.DEFINE_float("noise_precmax", 30, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 50, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.2, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.8, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 5, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
@@ -85,8 +85,8 @@ def plot_Valuefcn(Valuefcn, target, save_path, states=np.array([])):
     ax.plot(target, 0, 'ro', markersize=20)
 
     if len(state)> 0:
-        pos = np.argmax(states, axis=1)
-        ax.plot(pos, np.zeros(len(pos)), 'bo', markersize=20)  # imshow makes y-axis pointing downwards
+        posx, posy = np.where(states==1)#np.argmax(states, axis=1)
+        ax.plot(posy, np.zeros(len(posy)), 'bo', markersize=20)  # imshow makes y-axis pointing downwards
 
     fig.colorbar(im, orientation="horizontal", pad=0.2)
     plt.savefig(save_path)
@@ -96,6 +96,7 @@ def plot_Valuefcn(Valuefcn, target, save_path, states=np.array([])):
 #
 batch_size = FLAGS.batch_size
 eps = 0.
+scale = 1e-3
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -185,6 +186,25 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     # report mean reward per episode
     reward_episode = []
 
+    #
+    for kk in range(200):
+        tempbuffer.reset()
+
+        # sample theta (i.e. bandit)
+        env._sample_env()
+        # resample state
+        state = env._sample_state().copy()
+
+        for kkk in range(FLAGS.L_episode):
+            action = np.random.randint(FLAGS.action_space)
+            next_state, reward, done = env._step(action)
+            new_experience = [state, action, reward, next_state, done, 0.01] # td does not matter
+            tempbuffer.add(new_experience)
+
+        # append episode buffer to large buffer
+        fullbuffer.add(tempbuffer.buffer)
+
+
     # -----------------------------------------------------------------------------------
     # loop episodes
     print("Episodes...")
@@ -193,6 +213,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         # count reward
         rw = []
+
+        scale = np.max([0.995*scale, 1e-4])
+
+        if episode % 100 == 0:
+            print(scale)
 
         # loop tasks --------------------------------------------------------------------
         for n in range(FLAGS.N_tasks):
@@ -206,51 +231,35 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             state = env._sample_state().copy()
 
             # sample w from prior
-            sess.run([Qtarget.sample_prior])
+            sess.run([Qtarget.sample_prior], feed_dict={Qtarget.episode: episode})
 
             # loop steps
             step = 0
 
             while step < FLAGS.L_episode:
                 # take a step
-                Qval = sess.run([Qtarget.Qout], feed_dict={Qtarget.state: state.reshape(-1,FLAGS.state_space)})
+                Qval = sess.run(Qtarget.Qout, feed_dict={Qtarget.state: state.reshape(-1,FLAGS.state_space),
+                                                           Qtarget.is_online: True, Qtarget.scale: scale})
                 action = eGreedyAction(Qval, eps)
 
                 next_state, reward, done = env._step(action)
 
+                #
+                Qmax = sess.run(Qtarget.Qout, feed_dict={Qtarget.state: next_state.reshape(-1, FLAGS.state_space),
+                                                           Qtarget.is_online: True, Qtarget.scale: scale})
+
+                td_error = np.abs(np.max(Qmax) - reward - Qval[0][action])
+
                 # store experience in memory
-                new_experience = [state, action, reward, next_state, done]
+                new_experience = [state, action, reward, next_state, done, 0.01]
                 tempbuffer.add(new_experience)
 
                 # actual reward
                 rw.append(reward)
 
-                # State Value Fcn -----------------------------------------------------------
-                if (step == 0 or step == FLAGS.L_episode-1 ) and n == 0 and episode % FLAGS.save_frequency == 0:
-                    state_train = np.zeros([step + 1, FLAGS.state_space])
+                # ----------------------------------------------------------------------
 
-                    # fill array
-                    for k, experience in enumerate(tempbuffer.buffer):
-                        state_train[k] = experience[0]
-
-                    tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
-                    # state value
-                    V_TS = np.zeros([FLAGS.state_space])
-                    for i in range(FLAGS.state_space):
-                        ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
-                        ss[i] = 1
-                        w0_bar, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.Sigma_e, QNet.phi],
-                                                            feed_dict={QNet.state: ss.reshape(1, -1),
-                                                                       QNet.nprec: noise_precision})
-
-                        Qout = np.dot(np.transpose(w0_bar), phi[0])
-                        V_TS[i] = np.max(Qout)
-
-                    # plotting
-                    plot_Valuefcn(V_TS, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step), state_train)
-                # -----------------------------------------------------------------------
-
-                # update posterior
+                # update
                 if (step + 1) % FLAGS.update_freq_post == 0 and (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
                     reward_train = np.zeros([step + 1, ])
                     state_train = np.zeros([step + 1, FLAGS.state_space])
@@ -268,11 +277,39 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         done_train[k] = experience[4]
 
                     # update
-                    _ = sess.run([Qtarget.sample_post],
+                    _, wt_bar = sess.run([Qtarget.sample_post, Qtarget.wt_bar],
                         feed_dict={Qtarget.context_state: state_train, Qtarget.context_action: action_train,
                                    Qtarget.context_reward: reward_train, Qtarget.context_state_next: next_state_train,
-                                   Qtarget.context_done: done_train,
+                                   Qtarget.context_done: done_train, Qtarget.episode: episode,
                                    Qtarget.nprec: noise_precision, Qtarget.is_online: True})
+
+                # State Value Fcn -----------------------------------------------------------
+                if (step == 0 or step == FLAGS.L_episode - 1) and n == 0 and episode % FLAGS.save_frequency == 0:
+                    state_train = np.zeros([step + 1, FLAGS.state_space])
+
+                    # fill array
+                    for k, experience in enumerate(tempbuffer.buffer):
+                        state_train[k] = experience[0]
+
+                    tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
+                    # state value
+                    V_TS = np.zeros([FLAGS.state_space])
+                    for i in range(FLAGS.state_space):
+                        ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
+                        ss[i] = 1
+                        w0_bar, Sigma_e, phi = sess.run([Qtarget.w0_bar, Qtarget.Sigma_e, Qtarget.phi],
+                                                        feed_dict={Qtarget.state: ss.reshape(1, -1),
+                                                                   Qtarget.nprec: noise_precision})
+
+                        try:
+                            Qout = np.dot(np.transpose(wt_bar), phi[0])
+                        except:
+                            Qout = np.dot(np.transpose(w0_bar), phi[0])
+
+                        V_TS[i] = np.max(Qout)
+
+                    # plotting
+                    plot_Valuefcn(V_TS, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step), state_train)
 
                 # update state, and counters
                 state = next_state.copy()
@@ -280,6 +317,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 step += 1
 
                 # -----------------------------------------------------------------------
+            del wt_bar
 
             # append episode buffer to large buffer
             fullbuffer.add(tempbuffer.buffer)
@@ -291,67 +329,82 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         for e in range(batch_size):
 
             # sample from larger buffer [s, a, r, s', d] with current experience not yet included
-            experience = fullbuffer.sample(1)
+            idxs, experience = fullbuffer.sample(1)
 
             state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
             action_sample = np.zeros((FLAGS.L_episode,))
             reward_sample = np.zeros((FLAGS.L_episode,))
             next_state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
             done_sample = np.zeros((FLAGS.L_episode,))
+            td_sample = np.zeros((FLAGS.L_episode,))
 
             # fill arrays
-            for k, (s0, a, r, s1, d) in enumerate(experience[0]):
+            for k, (s0, a, r, s1, d, td) in enumerate(experience[0]):
                 state_sample[k] = s0
                 action_sample[k] = a
                 reward_sample[k] = r
                 next_state_sample[k] = s1
                 done_sample[k] = d
+                td_sample[k] = td
 
-                # split into context and prediction set
-                split = np.int(split_ratio * FLAGS.L_episode * np.random.rand())
+            # split into context and prediction set
+            split = np.int(split_ratio * FLAGS.L_episode * np.random.rand())
 
-                train = np.arange(0, split)
-                valid = np.arange(split, FLAGS.L_episode)
+            train = np.arange(0, split)
+            valid = np.arange(split, FLAGS.L_episode)
 
-                state_train = state_sample[train, :]
-                action_train = action_sample[train]
-                reward_train = reward_sample[train]
-                next_state_train = next_state_sample[train, :]
-                done_train = done_sample[train]
+            try:
+                valid = np.random.choice(valid, np.max([1, np.int(0.9* len(valid))]),
+                                     replace=False, p=td_sample[valid]/np.sum(td_sample[valid]))
+            except:
+                valid = np.random.choice(valid, np.max([1, np.int(0.9 * len(valid))]), replace=False)
 
-                state_valid = state_sample[valid, :]
-                action_valid = action_sample[valid]
-                reward_valid = reward_sample[valid]
-                next_state_valid = next_state_sample[valid, :]
-                done_valid = done_sample[valid]
+            state_train = state_sample[train, :]
+            action_train = action_sample[train]
+            reward_train = reward_sample[train]
+            next_state_train = next_state_sample[train, :]
+            done_train = done_sample[train]
+
+            state_valid = state_sample[valid, :]
+            action_valid = action_sample[valid]
+            reward_valid = reward_sample[valid]
+            next_state_valid = next_state_sample[valid, :]
+            done_valid = done_sample[valid]
 
             # select amax from online network
             amax_online = sess.run(QNet.max_action,
                 feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                             QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                             QNet.state: state_valid, QNet.state_next: next_state_valid,
-                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision})
+                            QNet.lr_placeholder: learning_rate, QNet.episode: episode,
+                           QNet.nprec: noise_precision})
 
             # evaluate target model
             Qmax_target = sess.run(Qtarget.Qmax,
                 feed_dict={Qtarget.context_state: state_train, Qtarget.context_action: action_train,
                            Qtarget.context_reward: reward_train, Qtarget.context_state_next: next_state_train,
                            Qtarget.state: state_valid, Qtarget.state_next: next_state_valid,
-                           Qtarget.lr_placeholder: learning_rate, Qtarget.nprec: noise_precision,
-                           Qtarget.amax_online: amax_online})
+                           Qtarget.lr_placeholder: learning_rate, Qtarget.episode: episode,
+                           Qtarget.nprec: noise_precision, Qtarget.amax_online: amax_online})
 
             # update model
-            grads, loss0 = sess.run(
-                [QNet.gradients, QNet.loss],
+            grads, loss0, Qdiff = sess.run(
+                [QNet.gradients, QNet.loss, QNet.Qdiff],
                 feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                            QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                            QNet.state: state_valid, QNet.action: action_valid,
                            QNet.reward: reward_valid, QNet.state_next: next_state_valid,
-                           QNet.done: done_valid,
+                           QNet.done: done_valid, QNet.episode: episode,
                            QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
                            QNet.Qmax_target: Qmax_target, QNet.amax_online: amax_online})
 
+            # update buffer
+            for v, vv in enumerate(valid):
+                experience[0][vv] = [state_sample[vv], action_sample[vv], reward_sample[vv], next_state_sample[vv], done_sample[vv], np.abs(Qdiff[v])]
 
+            fullbuffer.update(idxs, experience)
+
+            #
             for idx, grad in enumerate(grads): # grad[0] is gradient and grad[1] the variable itself
                 gradBuffer[idx] += (grad[0]/ batch_size)
 
@@ -362,25 +415,24 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         feed_dict = dictionary = dict(zip(QNet.gradient_holders, gradBuffer))
         feed_dict.update({QNet.lr_placeholder: learning_rate})
 
-        if episode > 100:
-            # reduce summary size
-            if episode % 10 == 0:
-                # update summary
-                _, summaries_gradvar = sess.run([QNet.updateModel, QNet.summaries_gradvar], feed_dict=feed_dict)
+        # reduce summary size
+        if episode % 10 == 0:
+            # update summary
+            _, summaries_gradvar = sess.run([QNet.updateModel, QNet.summaries_gradvar], feed_dict=feed_dict)
 
-                loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss', simple_value=(lossBuffer / batch_size))])
-                reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw)))])
+            loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss', simple_value=(lossBuffer / batch_size))])
+            reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward', simple_value=np.sum(np.array(rw))/FLAGS.N_tasks)])
 
-                learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
+            learning_rate_summary = tf.Summary(value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
 
-                summary_writer.add_summary(loss_summary, episode)
-                summary_writer.add_summary(reward_summary, episode)
-                summary_writer.add_summary(learning_rate_summary, episode)
-                summary_writer.add_summary(summaries_gradvar, episode)
+            summary_writer.add_summary(loss_summary, episode)
+            summary_writer.add_summary(reward_summary, episode)
+            summary_writer.add_summary(learning_rate_summary, episode)
+            summary_writer.add_summary(summaries_gradvar, episode)
 
-                summary_writer.flush()
-            else:
-                _ = sess.run([QNet.updateModel], feed_dict=feed_dict)
+            summary_writer.flush()
+        else:
+            _ = sess.run([QNet.updateModel], feed_dict=feed_dict)
 
 
         # reset buffers
@@ -427,7 +479,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 # resample state
                 state = env._sample_state().copy()
                 # sample w from prior
-                sess.run([QNet.sample_prior])
+                sess.run([QNet.sample_prior], feed_dict={QNet.episode: episode})
                 # loop steps
                 step = 0
 
@@ -463,7 +515,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                  feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
                                             QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
                                             QNet.context_done: done_train,
-                                            QNet.nprec: noise_precision})
+                                            QNet.nprec: noise_precision, QNet.episode: episode})
 
                     # update state, and counters
                     state = next_state.copy()
