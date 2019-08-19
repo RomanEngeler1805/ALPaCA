@@ -34,7 +34,7 @@ tf.flags.DEFINE_integer("noise_Ndrop", 50, "Increase noise precision every N ste
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.8, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.5, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 5, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
@@ -251,7 +251,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 td_error = np.abs(np.max(Qmax) - reward - Qval[0][action])
 
                 # store experience in memory
-                new_experience = [state, action, reward, next_state, done, 0.01]
+                new_experience = [state, action, reward, next_state, done, td_error]
                 tempbuffer.add(new_experience)
 
                 # actual reward
