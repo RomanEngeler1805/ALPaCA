@@ -1,7 +1,7 @@
 import numpy as np
 
 class environment():
-    ''' 7x1 square environment with reward sampled at random in corners '''
+    ''' Grid wold consisting of N squares with reward sampled at random in corners '''
 
     def __init__(self, state_space):
         # size of square
@@ -16,10 +16,15 @@ class environment():
 
         # initialize target
         self.target = np.array((self.size-1) * np.random.randint(0, 2))
+        #self.target = self.size - 1
+
+        self.rew_mag = 1. + np.random.normal()
 
     def _sample_env(self):
         ''' resample delta '''
         self.target = np.array((self.size-1) * np.random.randint(0, 2))
+        #self.target = self.size- 1
+        self.rew_mag = 1.+np.random.normal()
 
     def _sample_state(self):
         self.state = np.zeros([self.size])
@@ -29,10 +34,17 @@ class environment():
     def reward(self):
         ''' reward function '''
         if self.state[self.target] == 1:
-            return 1
+            return 1.
+
+        '''
+        p = 1.*(self.size- 1- np.abs(self.target- np.argmax(self.state)))/ (self.size- 1)
+        if p > np.random.rand():
+            rew = 1.
         else:
-            return -0.1
-        return 0
+            rew = 0.
+        '''
+
+        return 0.#10.*(self.size- 1- np.abs(self.target- np.argmax(self.state)))/ (self.size- 1)
 
     def termination(self):
         ''' determine termination of MDP '''
@@ -49,9 +61,6 @@ class environment():
         # update termination flag
         d = 0
 
-        # update reward
-        r = self.reward()
-
         if not d:
             if action == 1 and pos != 0: # left
                 self.state[pos] = 0
@@ -59,6 +68,9 @@ class environment():
             if action == 2 and pos != self.size-1: # down
                 self.state[pos] = 0
                 self.state[pos+ 1] = 1
+
+        # update reward
+        r = self.reward()
 
         # stack observation
         obs = np.array([self.state, r, d])
