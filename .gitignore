@@ -1,0 +1,6 @@
+*/model
+*/summaries
+*/logger
+*/figures
+*.pyc
+*/.ipynb_checkpoints
