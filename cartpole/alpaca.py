@@ -82,6 +82,7 @@ def eGreedyAction(x, epsilon=0.):
 #
 batch_size = FLAGS.batch_size
 eps = 0.9
+
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -208,6 +209,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # loop steps
             step = 0
 
+            wt_bar = np.array([0, 0])
+
+            #
+            td_error = 0.
+            Qold = 0.
+            rold = 0.
+
             while step < FLAGS.L_episode:
 
                 # take a step
@@ -216,6 +224,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 action = eGreedyAction(Qval, eps)
                 next_state, reward, done, _ = env._step(action)
+
+                #
+                td_error += np.square(Qold- rold- np.max(Qval))
+                Qold = np.argmax(Qval)
+                rold = reward
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
@@ -269,6 +282,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
             print(eps)
 
+            print(eps)
+
         # learning rate schedule
         if learning_rate > 1e-6:
             learning_rate /= FLAGS.lr_drop
@@ -316,7 +331,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # split in train and validation set
             #train = np.random.choice(np.arange(L_experience), np.int(split_ratio* L_experience), replace=False)  # mixed
             #valid = np.setdiff1d(np.arange(L_experience), train)
-            #valid = np.random.choice(valid, np.min([len(valid), np.int(0.3*L_experience)]), replace=False)
+
+            valid = np.random.choice(valid, np.min([len(valid), np.int(0.3*L_experience)]), replace=False)
 
             state_train = state_sample[train, :]
             action_train = action_sample[train]
@@ -407,7 +423,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             else:
                 _ = sess.run([QNet.updateModel], feed_dict=feed_dict)
 
-
         # reset buffers
         for idx in range(len(gradBuffer)):
             gradBuffer[idx] *= 0
@@ -439,6 +454,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         # ===============================================================
         # save model
+
         #if episode > 0 and episode % 1000 == 0:
           # Save a checkpoint
           #log.info('Save model snapshot')
@@ -453,6 +469,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
             print('Learning_rate: ' + str(np.round(learning_rate, 5)) + ', Nprec: ' + str(np.round(noise_precision, 4)) + ', Split ratio: ' + str(np.round(split_ratio, 2)))
+            #print('Buffer size: '+ str(len(fullbuffer.buffer)))
 
             # plot trajectory ----------------------------------------------
             state_train = np.zeros([step, FLAGS.state_space])
@@ -497,6 +514,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                                xacc* np.ones([Npts*Npts, 1]),
                                                polemesh[0].reshape(-1, 1),
                                                polemesh[1].reshape(-1, 1)], axis=1)
+
+
 
                     # value function
                     w0_bar, phi_mesh = sess.run([QNet.w0_bar, QNet.phi], feed_dict={QNet.state: meshgrid, QNet.episode: 0, QNet.is_training: False})
@@ -588,6 +607,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             plt.savefig(dV_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
             plt.close()
+
 
             # evaluate on 10 different initial positions with w0_bar
             # loop tasks --------------------------------------------------------------------

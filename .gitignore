@@ -4,3 +4,4 @@
 */figures
 *.pyc
 */.ipynb_checkpoints
+*/run_simulations
