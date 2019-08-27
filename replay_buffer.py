@@ -1,17 +1,18 @@
 from collections import deque
 import random
+import numpy as np
 
 class replay_buffer():
     def __init__(self, buffer_size):
         self.buffer_size = buffer_size
         self.num_experiences = 0
-
+c
         self.buffer = [] #deque()
 
     def sample(self, batch_size):
         ''' sample new batch from replay buffer '''
         # random draw N
-        random.seed()
+        # random.seed()
         return random.sample(self.buffer, batch_size)
 
     def add(self, new_experience):
@@ -20,7 +21,7 @@ class replay_buffer():
             self.buffer.append(new_experience)
             self.num_experiences += 1
         else:
-            self.buffer.pop(0)
+            self.buffer.pop(np.random.randint(0, self.num_experiences))
             self.buffer.append(new_experience)
 
     def reset(self):

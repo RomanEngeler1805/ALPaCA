@@ -49,7 +49,7 @@ class QNetwork():
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden3 = self.activation(self.hidden3)
 
-            #hidden3 = tf.layers.batch_normalization(hidden3, training=is_training)
+            hidden3 = tf.layers.batch_normalization(hidden3, training=is_training)
 
             # single head
             hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
