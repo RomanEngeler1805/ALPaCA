@@ -223,7 +223,7 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss3#+ self.regularizer* tf.reduce_sum(tf.math.square(self.L0_asym)) #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
+        self.loss = self.loss1+ self.loss2#+ self.regularizer* self.loss3#+ self.regularizer* tf.reduce_sum(tf.math.square(self.L0_asym)) #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)

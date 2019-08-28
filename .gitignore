@@ -1,5 +1,9 @@
+mountain_car/figures
+*.pyc
+*.idea
+run_simulations*
+run_simulations2
 */figures
-*/model
-*/summaries
 */logger
-*/run_simulations
+*/summaries
+*/model

@@ -39,6 +39,7 @@ class QNetwork():
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
             hidden1 = self.activation(self.hidden1)
             hidden1 = tf.layers.batch_normalization(hidden1, training=is_training)
+            #hidden1 = tf.concat([hidden1, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
@@ -52,6 +53,7 @@ class QNetwork():
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden3 = self.activation(self.hidden3)
             hidden3 = tf.layers.batch_normalization(hidden3, training=is_training)
+            #hidden3 = tf.concat([hidden3, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             # single head
             hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
@@ -70,9 +72,9 @@ class QNetwork():
         state = tf.tile(state, [1, 1, self.action_dim])
         state = tf.reshape(state, [-1, self.state_dim])
 
-        action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
+        #action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
 
-        state = tf.concat([state, action], axis = 1)
+        #state = tf.concat([state, action], axis = 1)
 
         return state
 

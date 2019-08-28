@@ -1,4 +1,5 @@
 import tensorflow as tf
+from tensorflow.python.ops import init_ops
 
 class QNetwork():
     def __init__(self, FLAGS, scope="QNetwork"):
@@ -31,35 +32,74 @@ class QNetwork():
             # build graph
             self._build_model()
 
+    def layer(self, input, input_dim, output_dim, name):
+
+        eW = tf.random.normal(shape=[input_dim, output_dim])
+        eb = tf.random.normal(shape=[output_dim])
+        sigmaW = self.scale* tf.ones(shape=[input_dim, output_dim])
+        sigmab = self.scale* tf.ones(shape=[output_dim])
+
+        muW = tf.get_variable('W'+name, shape=[input_dim, output_dim],
+                             initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
+        mub = tf.get_variable('b'+name, shape=[output_dim],
+                             initializer=init_ops.zeros_initializer(), dtype=tf.float32)
+
+        # parameter space noise during exploration only (Parameter Space Noise for Exploration)
+        W = tf.cond(self.is_online,
+                    lambda: muW+ tf.multiply(sigmaW, eW),
+                    lambda: muW)
+        b = tf.cond(self.is_online,
+                    lambda: mub+ tf.multiply(sigmab, eb),
+                    lambda: mub)
+
+        output = self.activation(tf.matmul(input, W) + b)
+
+        return output
+
     def model(self, x, a, is_training):
         ''' Embedding into latent space '''
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
+            '''
             self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
             hidden1 = self.activation(self.hidden1)
-            hidden1 = tf.layers.batch_normalization(hidden1, training=is_training)
+            #hidden1 = tf.layers.batch_normalization(hidden1, training=is_training)
+            #hidden1 = tf.concat([hidden1, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden2 = self.activation(self.hidden2)
-            hidden2 = tf.layers.batch_normalization(hidden2, training=is_training)
+            #hidden2 = tf.layers.batch_normalization(hidden2, training=is_training)
             hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden3 = self.activation(self.hidden3)
-            hidden3 = tf.layers.batch_normalization(hidden3, training=is_training)
+            #hidden3 = tf.layers.batch_normalization(hidden3, training=is_training)
+            #hidden3 = tf.concat([hidden3, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             # single head
             hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
+            '''
+
+            self.hidden1 = self.layer(x, self.state_dim, self.hidden_dim, 'hidden1')
+            self.hidden2 = self.layer(self.hidden1, self.hidden_dim, self.hidden_dim, 'hidden2')
+            self.hidden2 = tf.concat([self.hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+            self.hidden3 = self.layer(self.hidden2, self.hidden_dim+ self.action_dim, self.hidden_dim, 'hidden3')
+
+            W4 = tf.get_variable('W4', shape=[self.hidden_dim, self.latent_dim],
+                                 initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
+            b4 = tf.get_variable('b4', shape=[self.latent_dim],
+                                 initializer=init_ops.zeros_initializer(), dtype=tf.float32)
+            self.hidden4 = tf.matmul(self.hidden3, W4) + b4
 
             # bring it into the right order of shape [batch_size, latent_dim, action_dim]
-            hidden5_rs = tf.reshape(hidden5, [-1, self.action_dim, self.latent_dim])
+            hidden5_rs = tf.reshape(self.hidden4, [-1, self.action_dim, self.latent_dim])
             hidden5_rs = tf.transpose(hidden5_rs, [0, 2, 1])
 
         return hidden5_rs
@@ -70,9 +110,9 @@ class QNetwork():
         state = tf.tile(state, [1, 1, self.action_dim])
         state = tf.reshape(state, [-1, self.state_dim])
 
-        action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
+        #action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
 
-        state = tf.concat([state, action], axis = 1)
+        #state = tf.concat([state, action], axis = 1)
 
         return state
 
@@ -84,6 +124,9 @@ class QNetwork():
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
         self.episode = tf.placeholder(shape=[], dtype=tf.int32, name='episode')
         self.is_training = tf.placeholder_with_default(False, (), 'is_training')
+
+        self.is_online = tf.placeholder_with_default(False, (), 'is_online')
+        self.scale = tf.placeholder_with_default(1e-4, shape=[], name='scale')
 
         # for kl divergence to change learning dynamics
         self.w0_bar_old = tf.placeholder(tf.float32, shape=[self.latent_dim, 1], name='w0_bar_old')
@@ -223,7 +266,7 @@ class QNetwork():
 
         self.loss4 = tf.matmul(tf.reshape(self.L0_asym, [1,-1]), tf.reshape(self.L0_asym, [-1,1]))
 
-        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss3#+ self.regularizer* tf.reduce_sum(tf.math.square(self.L0_asym)) #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
+        self.loss = self.loss1+ self.loss2#+ self.regularizer* tf.reduce_sum(tf.math.square(self.L0_asym)) #+ FLAGS.regularizer* (self.loss_reg+ tf.nn.l2_loss(self.w0_bar))
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)

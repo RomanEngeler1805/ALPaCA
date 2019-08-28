@@ -1,0 +1,5 @@
+#!/bin/bash
+echo "==================="
+python alpaca.py --random_seed=1234 &
+sleep 1m
+python alpaca.py --random_seed=2345
