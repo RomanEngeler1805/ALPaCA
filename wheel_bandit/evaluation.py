@@ -4,6 +4,43 @@ import matplotlib.pyplot as plt
 from QNetwork import QNetwork
 from synthetic_data_sampler import sample_wheel_bandit_data
 from evaluation_tf import Qeval
+import sys
+import time
+
+# General Hyperparameters
+tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
+tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
+tf.flags.DEFINE_integer("state_space", 2, "Dimensionality of state space")
+tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("latent_space", 64, "Dimensionality of latent space")
+tf.flags.DEFINE_float("gamma", 0., "Discount factor")
+
+tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
+
+tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N steps")
+tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
+
+tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
+tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
+
+tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
+tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
+tf.flags.DEFINE_integer("save_frequency", 400, "Store images every N-th episode")
+tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
+tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
+
+tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
+
+FLAGS = tf.flags.FLAGS
+FLAGS(sys.argv)
+
+from wheel_bandit_environment import wheel_bandit_environment
+env = wheel_bandit_environment(FLAGS.action_space, FLAGS.random_seed)
 
 # for deltas in NP paper
 #   for i in {0, .. 50}
@@ -15,118 +52,108 @@ from evaluation_tf import Qeval
 
 # implement incremental GP updates!!!!
 
-class Bayesian_regression():
-    def __init__(self, w0, L0, num_instances):
-        self.num_instances = num_instances
-
-        # prior
-        self.w0 = w0
-        self.L0 = L0
-
-        self.Sigma_e = 1e-3
-
-        self.wt = self.w0
-
-        # posterior (parallelized)
-        self.wt_bar = np.zeros([self.num_instances, self.w0.shape])
-        self.Lt_inv = np.zeros([self.num_instances, self.L0.shape[0], self.L0.shape[1]])
-
-    def update_posterior(self, phit, rt):
-        if not phit.shape[1] == self.num_instances:
-            raise ERROR
-
-        # inverse precision
-        denum = 1+ np.einsum('bi,bij,bj->b', phit, self.Lt_inv, phit)
-        denum = np.reciprocal(denum)
-
-        num = np.einsum('bij,bj->bi', self.Lt_inv, phit)
-        num = np.einsum('bi,bj->bij', num, num)
-
-        self.Lt_inv = self.Lt_inv- np.einsum('bij,b->bij', num, denum)
-
-        # mean
-        self.qt = self.qt+ np.einsum('bi,b->bi', phit, rt)
-        self.wt_bar = np.einsum('ij,bj->bi', self.Lt_inv, self.qt)
-
-    def predict(self, phit):
-        # predictive
-        yt = tf.einsum('i,bi->b',self.wt, phit)
-        Sigma_t = self.Sigma_e* (1.+ tf.einsum('bi,ij,bj->b', phit, self.Lt_inv, phit))
-
-        return yt, Sigma_t
-
-
-
 # load tf model
-model_dir = ''
+model_dir = './model/16-58-27_08-19/'
 
-with tf.Session() as sess:
-    QNet = QNetwork()
-
-    saver = tf.train.Saver(max_to_keep=4)
-    saver.restore(sess, tf.train.latest_checkpoint(model_dir))
-    print('Successully restored model from '+ str(tf.train.latest_checkpoint(model_dir)))
-
+#
 # sample dataset
 num_contexts = 80000
-num_datasets = 50
+num_cond = 512
+num_datasets = 2
+batch_size = 1000
 
 num_actions = 5
 context_dim = 2
-mean_v = [1.0, 1.0, 1.0, 1.0, 1.2]
+mean_v = [1.2, 1.0, 1.0, 1.0, 1.0]
 std_v = [0.01, 0.01, 0.01, 0.01, 0.01]
 mu_large = 50
 std_large = 0.01
 
 noise_precision = 10.
 
-for delta in [0.5, 0.7, 0.9, 0.95]:
+delta = 0.7
+
+with tf.Session() as sess:
+    QNet = QNetwork(FLAGS)
+    Qeval = Qeval(FLAGS)
+
+    saver = tf.train.Saver(max_to_keep=4)
+    saver.restore(sess, tf.train.latest_checkpoint(model_dir))
+    print('Successully restored model from '+ str(tf.train.latest_checkpoint(model_dir)))
+
+    # np.hstack((contexts, rewards)), (opt_rewards, opt_actions)
     dataset, opt_wheel = sample_wheel_bandit_data(num_contexts, delta, mean_v, std_v, mu_large, std_large)
 
-# obtain encoding
-    phi = np.zeros([num_contexts, latent_dim])
-    batch_size = 100
+    # obtain encoding
+    phi = np.zeros([num_contexts, FLAGS.latent_space, FLAGS.action_space])
+
+    start = time.time()
 
     for i in range(0, num_contexts, batch_size):
-        phi[i:i+ batch_size] = sess.run(QNet.phi, feed_dict={QNet.state: dataset[i: i+batch_size]})
+        phi[i:i+ batch_size] = sess.run(QNet.phi, feed_dict={QNet.state: dataset[i: i+batch_size, :2]})
 
-# store encoding
+    # store encoding?
 
-# load encoding
+    # load encoding?
+
+    #
+    rew_agent = np.zeros([num_datasets])
+
+    #
+    data_idx = np.arange(num_contexts)
+
     # 50 random ordered datasets
-    data_idx = np.zeros([num_datasets, num_contexts])
     for shuffle in range(num_datasets):
+        print('Iteration {:2d}...'.format(shuffle))
         # shuffle dataset
-        data_idx[shuffle] = np.random.permutation(num_contexts)
+        np.random.shuffle(data_idx)
 
-    # array
-    actions = np.zeros(num_datasets, num_contexts)
-    rewards = np.zeros(num_datasets, num_contexts)
-    dones = np.zeros(num_datasets, num_contexts)
+        # array
+        actions = np.zeros(num_contexts)
+        rewards = np.zeros(num_contexts)
 
+        # sample prior
+        sess.run(QNet.sample_prior)
 
-    # loop over dataset
-    for i in range(num_contexts):
-        # calculate posterior
-        if i < 500: #the context size used in training
-            print(dataset.shape)
-            print(data_idx.shape)
-            print(dataset[data_idx[:,:i]].shape)
-            sess.run(QNet.sample_post,
-                     feed_dict={QNet.context_state: dataset[data_idx[:,:i]],
-                                QNet.context_action: actions[data_idx[:,:i]],
-                                Net.context_reward: rewards[data_idx[:,:i]],
-                                QNet.context_state_next: dataset[data_idx[:,:i]],
-                                QNet.context_done: dones[data_idx[:,:i]],
-                                QNet.nprec: noise_precision})
+        # loop over dataset
+        for i in range(num_cond):
 
-        # prediction
-        Qval = sess.run([QNet.Qout], feed_dict={QNet.phi: dataset[data_idx[:,i]]})
-        action = np.argmax(Qval, axis=1)
-        print(action.shape)
-        next_state, reward, done = [set[(step + 1) % L_valid, :2], mu[action], 0]  # cartesian
+            # calculate posterior
+            sess.run(Qeval.sample_post,
+                        feed_dict={Qeval.context_phi: phi[data_idx[:i]],
+                                Qeval.context_action: actions[:i],
+                                Qeval.context_reward: rewards[:i],
+                                Qeval.nprec: noise_precision})
 
-# store reward
+            # prediction
+            Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
+            action = np.argmax(Qval, axis=1)
+
+            actions[i] = action
+            rew_agent[shuffle] += dataset[data_idx[i], 2+ action] # first two entries are state
+
+        for i in range(num_cond, num_contexts, batch_size):
+            # prediction
+            Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i:i+batch_size]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
+            action = np.argmax(Qval, axis=1)
+
+            actions[i:i+batch_size] = action
+            rew_agent[shuffle] += np.sum(dataset[data_idx[i:i+batch_size], 2+ action]) # first two entries are state
+
+    # print reward
+    print('===================================')
+    print('Reward LSTD: ')
+    print('{:6.2f} +- {:5.2f} ({:2.0f} %)'.format(np.mean(rew_agent),
+                                        np.std(rew_agent),
+                                        np.std(rew_agent)/np.mean(rew_agent)* 100.))
+
+    print('Time for evaluation: {:5f}'.format(time.time() - start))
+    #print('Frequency of actions: ')
+    #print(['({:1d}: {:6d}) '.format(idx, a) for idx, a in enumerate(actions)])
+
+    print('===================================')
+    print('Optimal Reward: ')
+    print('{:6}'.format(np.sum(opt_wheel[0])))
 
 # uniform, optimal, Thompson w.r.t. random sample from the Gaussians (synthetic_data_sampler)
 
