@@ -218,15 +218,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
                     action = eGreedyAction(Qval, eps)
 
-                    if action == 1:
-                        aevn = np.array([-1,1,0])
-                    elif action == 2:
-                        aevn = -np.array([-1,1,0])
-                    else:
-                        aevn = np.array([0, 0, 0])
-
-                    next_state, reward, done = env.step(aevn)
-                    next_state = next_state[:6]
+                    next_state, reward, done = env.step(action_env(action))
+                    next_state = next_state
 
                     # store experience in memory
                     new_experience = [state, action, reward, next_state, done]
@@ -319,6 +312,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 ax[0].plot(state_sample[:,0], state_sample[:,1], 'b', marker='o', markersize=12)
                 ax[0].plot(state_sample[0, 0], state_sample[0, 1], 'cyan', marker='o', markersize=12)
                 ax[0].plot(env.goal_state[0], env.goal_state[1], 'r', marker='o', markersize=12)
+                ax[0].set_xlim([-10., 10.])
+                ax[0].set_ylim([-10., 10.])
                 actionx, actiony, _ = action_env(action_sample)
                 ax[1].plot(actionx)
                 ax[2].plot(actiony)
@@ -486,7 +481,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     Vmesh[ii, jj] = np.max(Qst)
 
             plt.figure()
-            plt.imshow(np.transpose(Vmesh), extent=[-5., 2., -2., 2.])
+            plt.imshow(np.transpose(Vmesh), extent=[-10., 10., -10., 10.])
             plt.plot(-1., 0., markersize=20)
             plt.savefig(V_M_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
             plt.close()

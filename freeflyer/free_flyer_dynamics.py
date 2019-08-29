@@ -120,7 +120,7 @@ class FreeFlyerDynamics:
     }
 
     def __init__(self, randomize_params=False,
-                 rand_init=False,
+                 rand_init=True,
                  discrete_actions=True,
                  configuration='solar'):
         # todo make take argument on single agent vs manipulation
@@ -187,6 +187,9 @@ class FreeFlyerDynamics:
         self.offset_distance = self.rs + self.ro + self.Ls + self.Lo
         self.start_state = np.zeros(self.s_dim)
         self.start_state[0] = -5.
+
+        # state
+        self.state = self.start_state
 
         # TODO define spaces
         high_ob = [self.x_upper,
@@ -282,14 +285,19 @@ class FreeFlyerDynamics:
 
             self.state = self.get_ob_sample()
         else:
-            self.state = self.start_state.copy()
+            # self.state = self.start_state.copy()
+            self.reset_state()
 
         return self.observation(self.state)
 
     def reset_state(self):
         if self.rand_init:
-            # todo
-            raise NotImplementedError
+            self.state[0] = np.random.uniform(-10, 10)
+            self.state[1] = np.random.uniform(-10, 10)
+            self.state[2] = 0.
+            self.state[3] = np.random.uniform(-0.5, 0.5)
+            self.state[4] = np.random.uniform(-0.5, 0.5)
+            self.state[5] = 0.
         else:
             self.state = self.start_state.copy()
 
@@ -488,7 +496,7 @@ class FreeFlyerDynamics:
 
         # add done and reward to observation
 
-        return np.array([self.observation(self.state), self.reward(), self.done()])
+        return np.array([self.observation(self.state), self.reward(action), self.done()])
 
     def done(self):
         #if np.linalg.norm(self.state[:2] - self.goal_state[:2]) < 1e-1:
@@ -499,11 +507,11 @@ class FreeFlyerDynamics:
 
         return 0
 
-    def reward(self):
+    def reward(self, action):
         if any(self.state[:3] > self.high_state[:3]) or any(self.state[:3] < self.low_state[:3]):
             return 0.
 
-        rew = 10. / (np.linalg.norm(self.state[:6] - self.goal_state[:6])+ 1.)
+        rew = 10. / (np.linalg.norm(self.state[:3] - self.goal_state[:3])+ 1.)- 0.1* np.linalg.norm(action)
         # rew = -np.linalg.norm(self.state[:2] - self.goal_state[:2])
         return rew
 
