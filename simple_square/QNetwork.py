@@ -1,5 +1,4 @@
 import tensorflow as tf
-from tensorflow.python.ops import init_ops
 
 class QNetwork():
     def __init__(self, FLAGS, scope="QNetwork"):
@@ -32,51 +31,33 @@ class QNetwork():
             # build graph
             self._build_model()
 
-    def layer(self, input, input_dim, output_dim, name):
-
-        eW = tf.random.normal(shape=[input_dim, output_dim])
-        eb = tf.random.normal(shape=[output_dim])
-        sigmaW = self.scale * tf.ones(shape=[input_dim, output_dim])
-        sigmab = self.scale * tf.ones(shape=[output_dim])
-
-        muW = tf.get_variable('W' + name, shape=[input_dim, output_dim],
-                              initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
-        mub = tf.get_variable('b' + name, shape=[output_dim],
-                              initializer=init_ops.zeros_initializer(), dtype=tf.float32)
-
-        # parameter space noise during exploration only (Parameter Space Noise for Exploration)
-        W = tf.cond(self.is_online,
-                    lambda: muW + tf.multiply(sigmaW, eW),
-                    lambda: muW)
-        b = tf.cond(self.is_online,
-                    lambda: mub + tf.multiply(sigmab, eb),
-                    lambda: mub)
-
-        f = tf.matmul(input, W)#tf.contrib.layers.layer_norm(tf.matmul(input, W), scale=None) # since we use relu
-
-        output = self.activation(f + b)
-
-        return output
-
-    def model(self, x, a, is_training):
+    def model(self, x, a):
         ''' Embedding into latent space '''
         with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
             # model architecture
-            self.hidden1 = self.layer(x, self.state_dim+ self.action_dim, self.hidden_dim, 'hidden1')
-            self.hidden2 = self.layer(self.hidden1, self.hidden_dim, self.hidden_dim, 'hidden2')
-            self.hidden2 = tf.concat([self.hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
-            self.hidden3 = self.layer(self.hidden2, self.hidden_dim + self.action_dim, self.hidden_dim, 'hidden3')
+            self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
+            hidden1 = self.activation(self.hidden1)
 
-            W4 = tf.get_variable('W4', shape=[self.hidden_dim, self.latent_dim],
-                                 initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
-            b4 = tf.get_variable('b4', shape=[self.latent_dim],
-                                 initializer=init_ops.zeros_initializer(), dtype=tf.float32)
-            self.hidden4 = tf.matmul(self.hidden3, W4) + b4
+            self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
+                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
+            hidden2 = self.activation(self.hidden2)
+            hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+
+            self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
+                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
+            hidden3 = self.activation(self.hidden3)
+
+            # single head
+            hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
+                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
 
             # bring it into the right order of shape [batch_size, latent_dim, action_dim]
-            hidden5_rs = tf.reshape(self.hidden4, [-1, self.action_dim, self.latent_dim])
+            hidden5_rs = tf.reshape(hidden5, [-1, self.action_dim, self.latent_dim])
             hidden5_rs = tf.transpose(hidden5_rs, [0, 2, 1])
-
 
         return hidden5_rs
 
@@ -86,9 +67,9 @@ class QNetwork():
         state = tf.tile(state, [1, 1, self.action_dim])
         state = tf.reshape(state, [-1, self.state_dim])
 
-        action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
+        #action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
 
-        state = tf.concat([state, action], axis = 1)
+        #state = tf.concat([state, action], axis = 1)
 
         return state
 
@@ -100,9 +81,7 @@ class QNetwork():
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
         #self.cprec = tf.placeholder(shape=[], dtype=tf.float32, name='cprec')
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
-        self.scale = tf.placeholder_with_default(1e-4, shape=[], name='scale')
         self.is_online = tf.placeholder_with_default(False, shape=[], name='is_online')
-        self.episode = tf.placeholder(shape=[], dtype=tf.float32, name='episode')
 
         # placeholders context data =======================================================
         self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
@@ -119,8 +98,8 @@ class QNetwork():
         context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
 
         # latent representation
-        self.context_phi = self.model(context_state, context_action_augm, self.is_online)  # latent space
-        self.context_phi_next = self.model(context_state_next, context_action_augm, self.is_online)  # latent space
+        self.context_phi = self.model(context_state, context_action_augm)  # latent space
+        self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
 
         # placeholders predictive data ====================================================
         ## prediction data
@@ -138,8 +117,8 @@ class QNetwork():
         state_next = self.state_trafo(self.state_next, action_augm)
 
         # latent representation
-        self.phi = self.model(state, action_augm, self.is_online) # latent space
-        self.phi_next = self.model(state_next, action_augm, self.is_online)  # latent space
+        self.phi = self.model(state, action_augm) # latent space
+        self.phi_next = self.model(state_next, action_augm)  # latent space
 
         # noise variance
         self.Sigma_e_context = 1. / self.nprec * tf.ones(bsc, name='noise_precision')
@@ -180,20 +159,25 @@ class QNetwork():
         self.max_action = tf.one_hot(tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
 
         self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
-        self.Qmax = tf.einsum('im,bi->b', self.wt_bar, tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2))
+        self.phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
 
-        self.Qmax_target = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')
+        self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='Qmax_target')
+        '''
+        phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.max_action), axis=2)
+        phi_max = tf.einsum('b,ba->ba', (tf.ones(bs, ) - self.done), phi_max)
+        phi_max = tf.stop_gradient(phi_max)
+        '''
+
+        self.Qmax_target = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
+
         self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_target)
 
         # Q(s',a*)+ r- Q(s,a)
         self.Qdiff = self.Qtarget - self.Q
 
         # predictive covariance
-        phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
-        phi_max = tf.einsum('b,ba->ba', (tf.ones(bs, ) - self.done), phi_max)
-        phi_max = tf.stop_gradient(phi_max)
 
-        self.phi_hat = phi_taken - self.gamma * phi_max
+        self.phi_hat = phi_taken - self.gamma * self.phi_max_target
 
         Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat,
                                name='Sigma_pred') + self.Sigma_e  # column vector
@@ -209,7 +193,8 @@ class QNetwork():
 
         self.loss2 = logdet_Sigma
 
-        self.loss = tf.losses.huber_loss(labels, predictions, delta=100.)+ self.loss2
+        # tf.losses.huber_loss(labels, predictions, delta=100.)
+        self.loss = self.loss1+ self.loss2
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
@@ -279,15 +264,10 @@ class QNetwork():
         # I've done that differently than outlined in the write-up
         # since I don't like to put the noise variance inside the prior
         Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context)) # noise precision
-        Lt = tf.cond(self.is_online,
-                     lambda: tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0,
-                     lambda: tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0)
+        Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0
         Lt_inv = tf.linalg.inv(Lt) # posterior variance
-        wt_unnormalized = tf.cond(self.is_online,
-                     lambda:tf.matmul(self.L0, self.w0_bar) + \
-                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1]))),
-                     lambda: tf.matmul(self.L0, self.w0_bar) + \
-                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1]))))
+        wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
+                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
         wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean
 
         return wt_bar, Lt_inv
