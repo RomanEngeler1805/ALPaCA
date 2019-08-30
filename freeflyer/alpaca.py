@@ -20,7 +20,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.17)
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 9, "Dimensionality of action space")  # only x-y currently
 tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
-tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.99, "Discount factor")
 
@@ -28,7 +28,7 @@ tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 10., "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 1.0, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
@@ -89,7 +89,7 @@ def action_env(action):
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.9
+eps = 0.
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -213,44 +213,22 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             while step < FLAGS.L_episode:
 
-                if step% 1 == 0:
-                    # take a step
-                    Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
-                    action = eGreedyAction(Qval, eps)
+                # take a step
+                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
+                action = eGreedyAction(Qval, eps)
 
-                    next_state, reward, done = env.step(action_env(action))
-                    next_state = next_state
+                next_state, reward, done = env.step(action_env(action))
+                next_state = next_state
 
-                    # store experience in memory
-                    new_experience = [state, action, reward, next_state, done]
-                else:
-                    # controller
-                    err = env.goal_state[:6]- state
-                    kp = np.array([[0.001, 0, 0, 5e-2, 0, 0],
-                                   [0, 0.001, 0, 0, 5e-2, 0],
-                                   [0, 0, -0.1, 0, 0, -10.]])
-                    u = np.dot(kp, err)
-                    theta = env.state[2]
-
-                    R = np.array([[np.cos(np.pi/4.+ theta), np.sin(np.pi/4.+ theta), 0.],
-                                  [-np.sin(np.pi/4.+ theta), np.cos(np.pi/4.+ theta), 0.],
-                                  [0., 0., 1.]])
-
-                    action = np.sign(-np.dot(R, u))
-                    action = action* (np.abs(action)> 0.1)
-
-                    next_state, reward, done = env.step(action)
-                    next_state = next_state[:6]
-
-                    new_experience = [state, (action[0] + 1) + (action[1] + 1) * 3, reward, next_state, done]
-
+                # store experience in memory
+                new_experience = [state, action, reward, next_state, done]
 
                 '''
                 if episode % 50 == 0 and n == 0:
                     env.render()
                     print('(' + str(state[:3]) + ', ' + str(next_state[:3]) + ', ' + str(env.goal_state[:3]) + ', ' + str(reward)+ ')')
                 '''
-                eps = np.max([eps*0.99998, 0.1])
+                #eps = np.max([eps*0.99998, 0.1])
 
                 # store experience in memory
                 tempbuffer.add(new_experience)

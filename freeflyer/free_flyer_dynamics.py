@@ -511,7 +511,7 @@ class FreeFlyerDynamics:
         if any(self.state[:3] > self.high_state[:3]) or any(self.state[:3] < self.low_state[:3]):
             return 0.
 
-        rew = 10. / (np.linalg.norm(self.state[:3] - self.goal_state[:3])+ 1.)- 0.1* np.linalg.norm(action)
+        rew = 10. / (np.linalg.norm(self.state[:3] - self.goal_state[:3])+ 1.)- 0.01* np.linalg.norm(action)
         # rew = -np.linalg.norm(self.state[:2] - self.goal_state[:2])
         return rew
 
