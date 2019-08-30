@@ -24,6 +24,8 @@ tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
+tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
+
 tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.9, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
@@ -47,7 +49,7 @@ model_dir = './model/14-32-29_08-19/'
 
 #
 # sample dataset
-num_contexts = 50
+num_contexts = 80000
 num_datasets = 50
 batch_size = 50
 
@@ -58,8 +60,9 @@ std_v = [0.01, 0.01, 0.01, 0.01, 0.01]
 mu_large = 50
 std_large = 0.01
 
-delta = 0.5
+delta = 0.9
 
+# Create Session
 with tf.Session() as sess:
     QNet = QNetwork(FLAGS)
     Qeval = Qeval(FLAGS)
@@ -68,92 +71,99 @@ with tf.Session() as sess:
     saver.restore(sess, tf.train.latest_checkpoint(model_dir))
     print('Successfully restored model from '+ str(tf.train.latest_checkpoint(model_dir)))
 
-    # np.hstack((contexts, rewards)), (opt_rewards, opt_actions)
-    dataset, opt_wheel = sample_wheel_bandit_data(num_contexts, delta, mean_v, std_v, mu_large, std_large)
+    # Loop over deltas (exploration parameter)
+    for delta in [0.5, 0.7, 0.9, 0.95, 0.99]:
 
-    # obtain encoding
-    phi = np.zeros([num_contexts, FLAGS.latent_space, FLAGS.action_space])
+        # np.hstack((contexts, rewards)), (opt_rewards, opt_actions)
+        dataset, opt_wheel = sample_wheel_bandit_data(num_contexts, delta, mean_v, std_v, mu_large, std_large)
 
-    start = time.time()
+        # monitor time
+        start = time.time()
 
-    for i in range(0, num_contexts, batch_size):
-        phi[i:i+ batch_size] = sess.run(QNet.phi, feed_dict={QNet.state: dataset[i: i+batch_size, :2]})
+        # obtain encoding
+        phi = np.zeros([num_contexts, FLAGS.latent_space, FLAGS.action_space])
+        for i in range(0, num_contexts, batch_size):
+            phi[i:i+ batch_size] = sess.run(QNet.phi, feed_dict={QNet.state: dataset[i: i+batch_size, :2]})
 
-    # store encoding?
+        # arrays for final statistics
+        rew_agent = np.zeros([num_datasets])
+        rew_rand = np.zeros([num_datasets])
 
-    # load encoding?
+        # array to keep track of indices of shuffled array
+        data_idx = np.arange(num_contexts)
 
-    #
-    rew_agent = np.zeros([num_datasets])
-    rew_rand = np.zeros([num_datasets])
+        # 50 random ordered datasets
+        for shuffle in range(num_datasets):
+            #if shuffle% 10 == 0:
+                #print('Iteration {:2d}...'.format(shuffle))
+            # shuffle dataset
+            np.random.shuffle(data_idx)
 
-    #
-    data_idx = np.arange(num_contexts)
+            # array
+            actions = np.zeros(num_contexts)
+            rewards = np.zeros(num_contexts)
 
-    # 50 random ordered datasets
-    for shuffle in range(num_datasets):
-        print('Iteration {:2d}...'.format(shuffle))
-        # shuffle dataset
-        np.random.shuffle(data_idx)
+            # sample prior (reset for new evaluation)
+            sess.run(Qeval.sample_prior)
 
-        # array
-        actions = np.zeros(num_contexts)
-        rewards = np.zeros(num_contexts)
+            # loop over dataset
+            for i in range(np.int(FLAGS.split_ratio* FLAGS.L_episode)):
 
-        # sample prior
-        sess.run(Qeval.sample_prior)
+                # calculate posterior
+                sess.run(Qeval.sample_post,
+                            feed_dict={Qeval.context_phi: phi[data_idx[:i]],
+                                    Qeval.context_action: actions[:i],
+                                    Qeval.context_reward: rewards[:i],
+                                    Qeval.nprec: FLAGS.noise_precision})
 
-        # loop over dataset
-        for i in range(np.int(FLAGS.split_ratio* FLAGS.L_episode)):
+                # prediction
+                Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
+                action = np.argmax(Qval, axis=1)
 
-            # calculate posterior
-            sess.run(Qeval.sample_post,
-                        feed_dict={Qeval.context_phi: phi[data_idx[:i]],
-                                Qeval.context_action: actions[:i],
-                                Qeval.context_reward: rewards[:i],
-                                Qeval.nprec: FLAGS.noise_precision})
+                actions[i] = action
+                rewards[i] = dataset[data_idx[i], 2+ action]
 
-            # prediction
-            Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
-            action = np.argmax(Qval, axis=1)
+                # store observed reward
+                rew_agent[shuffle] += dataset[data_idx[i], 2+ action] # first two entries are state
+                rew_rand[shuffle] += dataset[data_idx[i], 2 + np.random.randint(0,5)]  # first two entries are state
 
-            actions[i] = action
-            rew_agent[shuffle] += dataset[data_idx[i], 2+ action] # first two entries are state
-            rew_rand[shuffle] += dataset[data_idx[i], 2 + np.random.randint(0,5)]  # first two entries are state
+            for i in range(np.int(FLAGS.split_ratio* FLAGS.L_episode), num_contexts, batch_size):
+                # prediction
+                Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i:i+batch_size]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
+                action = np.argmax(Qval, axis=1)
 
-        for i in range(np.int(FLAGS.split_ratio* FLAGS.L_episode), num_contexts, batch_size):
-            # prediction
-            Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i:i+batch_size]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
-            action = np.argmax(Qval, axis=1)
+                actions[i:i+batch_size] = action
+                rewards[i:i+batch_size] = dataset[data_idx[i:i+batch_size], 2+ action]
 
-            actions[i:i+batch_size] = action
-            rew_agent[shuffle] += np.sum(dataset[data_idx[i:i+batch_size], 2+ action]) # first two entries are state
-            rew_rand[shuffle] += np.sum(dataset[data_idx[i:i+batch_size], 2 + np.random.randint(0, 5, size=np.min([batch_size, num_contexts-i]))])  # first two entries are state
+                # store observed reward
+                rew_agent[shuffle] += np.sum(dataset[data_idx[i:i+batch_size], 2+ action]) # first two entries are state
+                rew_rand[shuffle] += np.sum(dataset[data_idx[i:i+batch_size], 2 + np.random.randint(0, 5, size=np.min([batch_size, num_contexts-i]))])  # first two entries are state
 
-    # print reward
-    print('===================================')
-    print('Reward LSTD: ')
-    print('{:6.2f} +- {:5.2f} ({:2.0f} %)'.format(np.mean(rew_agent),
-                                        np.std(rew_agent),
-                                        np.std(rew_agent)/np.mean(rew_agent)* 100.))
+        # print reward
+        print('===================================')
+        print('=========== delta = '+ str(delta) +' ==========')
+        print('Reward LSTD: ')
+        print('{:6.2f} +- {:5.2f} ({:2.0f} %)'.format(np.mean(rew_agent),
+                                            np.std(rew_agent),
+                                            np.std(rew_agent)/np.mean(rew_agent)* 100.))
 
-    print('Time for evaluation: {:5f}'.format(time.time() - start))
-    #print('Frequency of actions: ')
-    #print(['({:1d}: {:6d}) '.format(idx, a) for idx, a in enumerate(actions)])
+        #print('Frequency of actions: ')
+        #print(['({:1d}: {:6d}) '.format(idx, a) for idx, a in enumerate(actions)])
 
-    print('===================================')
-    print('Random Reward: ')
-    print('{:6}'.format(np.mean(rew_rand)))
+        print('-----------------------------------')
+        print('Random Reward: ')
+        print('{:6}'.format(np.mean(rew_rand)))
 
-    print('===================================')
-    print('Optimal Reward: ')
-    print('{:6}'.format(np.sum(opt_wheel[0])))
+        print('-----------------------------------')
+        print('Optimal Reward: ')
+        print('{:6}'.format(np.sum(opt_wheel[0])))
 
-    print('===================================')
-    print('Regret: ')
-    print('{:6}'.format(100*(np.sum(opt_wheel[0])-np.mean(rew_agent))/
-                        (np.sum(opt_wheel[0])-np.mean(rew_rand))))
+        print('-----------------------------------')
+        print('Regret: ')
+        print('{:3.2f}% +- {:2.2f}%'.format(100.*(np.sum(opt_wheel[0])-np.mean(rew_agent))/
+                                        (np.sum(opt_wheel[0])-np.mean(rew_rand)),
+                                         100.*np.std(rew_agent)/(np.sum(opt_wheel[0])-np.mean(rew_rand))))
 
-# uniform, optimal, Thompson w.r.t. random sample from the Gaussians (synthetic_data_sampler)
-
-# Q: what's the optimal context size?
+        print('-----------------------------------')
+        print('Time for evaluation: {:5f}'.format(time.time() - start))
+        print('===================================')
