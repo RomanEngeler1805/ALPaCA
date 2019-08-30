@@ -6,14 +6,29 @@ class replay_buffer():
     def __init__(self, buffer_size):
         self.buffer_size = buffer_size
         self.num_experiences = 0
-
         self.buffer = [] #deque()
 
     def sample(self, batch_size):
         ''' sample new batch from replay buffer '''
         # random draw N
         # random.seed()
+        '''
+        #random.seed()
+        idxs = np.random.choice(self.num_experiences, batch_size)
+
+        return_buff = []
+        for i in range(batch_size):
+            return_buff.append(self.buffer[idxs[i]])
+        return idxs, return_buff
+
+        #return idxs, self.buffer[idxs]#random.sample(self.buffer, batch_size)
+        '''
         return random.sample(self.buffer, batch_size)
+
+    def update(self, idxs, buff):
+        #for i, idx in enumerate(idxs):
+        #    self.buffer[idx] = buff[i]
+        pass
 
     def add(self, new_experience):
         ''' add new experience to replay buffer '''
@@ -23,6 +38,7 @@ class replay_buffer():
         else:
             pop_idx = 0#(np.random.geometric(0.005)-1)% self.buffer_size
             self.buffer.pop(pop_idx)
+
             self.buffer.append(new_experience)
             '''
             keep_prob = 1.* self.buffer_size/self.num_experiences

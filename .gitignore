@@ -7,3 +7,6 @@ run_simulations2
 */logger
 */summaries
 */model
+*.pyc
+*/.ipynb_checkpoints
+*/run_simulations
