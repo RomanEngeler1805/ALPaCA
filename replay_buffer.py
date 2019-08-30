@@ -38,8 +38,8 @@ class replay_buffer():
             self.num_experiences += 1
         else:
             #self.buffer.pop(np.random.randint(0, self.num_experiences))
-            #pop_idx = 0#(np.random.geometric(0.005)-1)% self.buffer_size
-            #self.buffer.pop(pop_idx)
+            pop_idx = 0#(np.random.geometric(0.005)-1)% self.buffer_size
+            self.buffer.pop(pop_idx)
 
             self.buffer.append(new_experience)
             '''

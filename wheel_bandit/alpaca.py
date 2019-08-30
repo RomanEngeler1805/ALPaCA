@@ -52,7 +52,10 @@ tf.flags.DEFINE_integer("save_frequency", 400, "Store images every N-th episode"
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
+tf.flags.DEFINE_bool("load_model", False, "Load trained model")
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
+
+model_dir = './model/XX'
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
@@ -196,7 +199,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # saver.save(sess, filename, global_step=episode, write_meta_graph=False)
             saver.save(sess, filename, global_step=episode)
 
-        if False == True:
+        if FLAGS.load_model == True:
             saver.restore(sess, tf.train.latest_checkpoint(saver_dir))
             print('Successully restored model from '+ str(tf.train.latest_checkpoint(saver_dir)))
 
@@ -408,7 +411,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio + 0.01, 0.1])
+            split_ratio = np.min([split_ratio + 0.01, 0.9])
 
         # ===============================================================
         # update target network
@@ -461,10 +464,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 for ns in range(n_sets):
 
-                    set = reward_context[ns]
+                    dataset = reward_context[ns]
 
                     for sh in range(n_shuffle): # shuffling
-                        np.random.shuffle(set)
+                        np.random.shuffle(dataset)
 
                         # data buffer
                         rewardbuffer.reset()
@@ -478,7 +481,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         step = 0
 
                         # resample state
-                        state = set[step, :2] # cartesian
+                        state = dataset[step, :2] # cartesian
 
                         # sample w from prior
                         sess.run([QNet.sample_prior])
@@ -486,7 +489,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         while step < L_valid:
                             # --------------------------------------
                             # get index of mean value for all actions (before state internal env state is updated)
-                            mu_idx = env._mu_idx(set[step, 2:]) # cylindrical
+                            mu_idx = env._mu_idx(dataset[step, 2:]) # cylindrical
                             # get mean reward for each action
                             mu = env.mu[mu_idx]
 
@@ -503,7 +506,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                             # expected model reward
                             rw.append(mu[action])
 
-                            next_state, reward, done = env._step(action) # cartesian
+                            next_state, reward, done = [dataset[(step + 1) % L_valid, :2], mu[action], 0]  # cartesian
 
                             # store experience in memory
                             new_experience = [state, action, reward, next_state, done]
