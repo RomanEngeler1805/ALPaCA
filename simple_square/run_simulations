@@ -6,27 +6,7 @@ python alpaca.py --state_space=9 --update_freq_post=1 --random_seed=1234 &
 sleep 1m
 python alpaca.py --state_space=9 --update_freq_post=1 --random_seed=2345
 wait
-python alpaca.py --state_space=9 --update_freq_post=2 --random_seed=1234 &
-sleep 1m
-python alpaca.py --state_space=9 --update_freq_post=2 --random_seed=2345
-wait
-python alpaca.py --state_space=9 --update_freq_post=3 --random_seed=1234 &
-sleep 1m
-python alpaca.py --state_space=9 --update_freq_post=3 --random_seed=2345
-wait
 python alpaca.py --state_space=9 --update_freq_post=4 --random_seed=1234 &
 sleep 1m
 python alpaca.py --state_space=9 --update_freq_post=4 --random_seed=2345
-wait
-python alpaca.py --state_space=9 --update_freq_post=5 --random_seed=1234 &
-sleep 1m
-python alpaca.py --state_space=9 --update_freq_post=5 --random_seed=2345
-wait
-python alpaca.py --state_space=9 --update_freq_post=6 --random_seed=1234 &
-sleep 1m
-python alpaca.py --state_space=9 --update_freq_post=6 --random_seed=2345
-wait
-python alpaca.py --state_space=9 --update_freq_post=7 --random_seed=1234 &
-sleep 1m
-python alpaca.py --state_space=9 --update_freq_post=7 --random_seed=2345
 wait
