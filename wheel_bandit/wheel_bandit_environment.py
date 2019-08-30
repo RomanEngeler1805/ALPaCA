@@ -17,13 +17,13 @@ class wheel_bandit_environment():
         self.state = np.random.rand(self.n_dim) # [radius, phase]
 
         # feature
-        self.delta = (0.4+ 0.59*np.random.rand())
+        self.delta = (0.+ 0.99*np.random.rand())
         self.mu = np.array([1.2, 1.0, 50.]) # mean values for normal distributions
         self.sigma = 0.01 # standard deviation
 
     def _sample_env(self):
         ''' resample delta '''
-        self.delta = (0.4+ 0.59*np.random.rand())
+        self.delta = (0.+ 0.99*np.random.rand())
 
     def _sample_state(self):
         ''' resample state '''

@@ -27,12 +27,12 @@ tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
-tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
+tf.flags.DEFINE_integer("split_N", 10, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
@@ -41,7 +41,7 @@ tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
 tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 500, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 20, "Update frequency of target network")
@@ -411,7 +411,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio + 0.01, 0.9])
+            split_ratio = np.min([split_ratio + 0.005, 0.9])
 
         # ===============================================================
         # update target network
