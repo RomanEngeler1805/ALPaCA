@@ -146,15 +146,15 @@ def sample_wheel_bandit_data(num_contexts, delta, mean_v, std_v,
           r[1] = r_big
           opt_actions.append(1)
         else:
-          r[2] = r_big
-          opt_actions.append(2)
-      else:
-        if contexts[i, 1] > 0:
-          r[3] = r_big
-          opt_actions.append(3)
-        else:
           r[4] = r_big
           opt_actions.append(4)
+      else:
+        if contexts[i, 1] > 0:
+          r[2] = r_big
+          opt_actions.append(2)
+        else:
+          r[3] = r_big
+          opt_actions.append(3)
     else:
       opt_actions.append(np.argmax(mean_v))
 
