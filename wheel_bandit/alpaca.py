@@ -41,7 +41,7 @@ tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
 tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 500, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 20, "Update frequency of target network")
@@ -147,6 +147,40 @@ fullbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all
 tempbuffer = replay_buffer(FLAGS.L_episode) # buffer for episode
 rewardbuffer = replay_buffer(FLAGS.L_episode) # buffer for episode
 log.info('Build Tensorflow Graph')
+
+# ======= Dataset Generation ===========
+from synthetic_data_sampler import sample_wheel_bandit_data
+num_contexts = FLAGS.L_episode
+num_datasets = 64
+
+num_actions = 5
+context_dim = 2
+mean_v = [1.2, 1.0, 1.0, 1.0, 1.0]
+std_v = [0.01, 0.01, 0.01, 0.01, 0.01]
+mu_large = 50
+std_large = 0.01
+
+# training
+deltas_train = np.random.rand(num_datasets)
+
+dataset_train = np.empty([num_datasets, num_contexts, 7])
+opt_wheel_train = np.empty([num_datasets, num_contexts, 2])
+
+for ds in range(num_datasets):
+    dataset_train[ds], opt_wheel_train[ds] = sample_wheel_bandit_data(num_contexts, deltas_train[ds],
+                                                                      mean_v, std_v, mu_large, std_large)
+
+# evaluation
+deltas_eval = np.array([0.5, 0.7, 0.9, 0.95, 0.99])
+
+dataset_eval = np.empty([len(deltas_eval), num_contexts, 7])
+opt_wheel_eval = np.empty([len(deltas_eval), num_contexts, 2])
+
+for ds in range(len(deltas_eval)):
+    dataset_eval[ds], opt_wheel_eval[ds] = sample_wheel_bandit_data(num_contexts, deltas_eval[ds],
+                                                                      mean_v, std_v, mu_large, std_large)
+
+# ========================================
 
 # initialize environment
 env = wheel_bandit_environment(FLAGS.action_space, FLAGS.random_seed)
@@ -383,130 +417,104 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         if episode % FLAGS.save_frequency == 0:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
-            print('Reward in Episode ' + str(episode)+  ':   '+ str(np.sum(rw)))
-            print('Learning_rate: '+ str(np.round(learning_rate,4))+ ', Nprec: '+ str(np.round(noise_precision,4))+ ', Split ratio: '+ str(np.round(split_ratio, 2)))
+            print('Reward in Episode ' + str(episode) + ':   ' + str(np.sum(rw)))
+            print('Learning_rate: ' + str(np.round(learning_rate, 4)) + ', Nprec: ' + str(
+                np.round(noise_precision, 4)) + ', Split ratio: ' + str(np.round(split_ratio, 2)))
 
             # evaluation of regret to compare against bayesian bandit showdown paper ===================================
-            L_valid = 50
-            n_sets = 10
-            n_shuffle = 12
-
-            if episode == 0:
-                # fill context array
-                reward_context = np.zeros([n_sets, L_valid, FLAGS.state_space*2]) #+1 since next_state
-                for ns in range(n_sets):
-                    for rc in range(L_valid):
-                        reward_context[ns, rc, :2] = env._sample_state() # cartesian
-                        reward_context[ns, rc, 2:] = env.state # cylindrical
+            n_shuffle = 10
 
             # loop over exploration parameter
-            for delta_eval in [0.5, 0.7, 0.9, 0.95, 0.99]:
-                env.delta = delta_eval
+            for de, deval in enumerate(deltas_eval):
 
-                cum_regr_QN = np.zeros([n_sets, n_shuffle])
-                cum_regr_UF = np.zeros([n_sets, n_shuffle])
+                cum_regr_QN = np.zeros([n_shuffle])
+                cum_regr_UF = np.zeros([n_shuffle])
 
-                cum_rew_QN = np.zeros([n_sets, n_shuffle])
-                cum_rew_UF = np.zeros([n_sets, n_shuffle])
-                cum_rew_ST = np.zeros([n_sets, n_shuffle])
+                cum_rew_QN = np.zeros([n_shuffle])
+                cum_rew_UF = np.zeros([n_shuffle])
+                cum_rew_ST = np.zeros([n_shuffle])
 
                 # ----------------------------------------------------------------------------------------------
+                '''
                 dir = histo_dir + '/' + str(np.int(100 * delta_eval)) + '/'
                 if not os.path.exists(dir):
                     os.makedirs(dir)
                 path = dir + 'Epoch_' + str(episode)
                 plot_Value_fcn(path, env, sess, QNet, noise_precision)
-
+                '''
                 # -----------------------------------------------------------------------------------------------
 
-                for ns in range(n_sets):
+                for sh in range(n_shuffle):
 
-                    dataset = reward_context[ns]
+                    shuffle_idx = np.random.permutation(np.arange(num_contexts))
+                    dataset_eval[de] = dataset_eval[de, shuffle_idx, :]
+                    opt_wheel_eval[de] = opt_wheel_eval[de, shuffle_idx, :]
 
-                    for sh in range(n_shuffle): # shuffling
-                        np.random.shuffle(dataset)
+                    # store expected rewards
+                    rw = []
+                    r_star = 0
+                    r_uni = []
 
-                        # data buffer
-                        rewardbuffer.reset()
+                    # loop steps
+                    step = 0
 
-                        # store expected rewards
-                        rw = []
-                        r_star = []
-                        r_uni = []
+                    # sample w from prior
+                    sess.run(QNet.reset_post)
+                    sess.run([QNet.sample_prior])
 
-                        # loop steps
-                        step = 0
+                    r_star += np.sum(opt_wheel_eval[de, :, 0])
 
-                        # resample state
-                        state = dataset[step, :2] # cartesian
+                    while step < num_contexts:
 
-                        # sample w from prior
-                        sess.run([QNet.sample_prior])
-                        sess.run(QNet.reset_post)
+                        state = dataset_eval[de, step, :2]
 
-                        while step < L_valid:
-                            # --------------------------------------
-                            # get index of mean value for all actions (before state internal env state is updated)
-                            mu_idx = env._mu_idx(dataset[step, 2:]) # cylindrical
-                            # get mean reward for each action
-                            mu = env.mu[mu_idx]
+                        # uniform reward
+                        r_uni.append(dataset_eval[de,step, 2+ np.random.randint(5)])
 
-                            # expected max reward
-                            r_star.append(np.max(mu))
+                        # take a step
+                        Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1, FLAGS.state_space)})
+                        action = eGreedyAction(Qval, eps)
 
-                            # expected uniform reward
-                            r_uni.append(np.mean(mu))
+                        #action =
 
-                            # take a step
-                            Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1, FLAGS.state_space)})
-                            action = eGreedyAction(Qval, eps)
+                        reward = dataset_eval[de,step, 2+ action]
 
-                            # expected model reward
-                            rw.append(mu[action])
+                        # expected model reward
+                        rw.append(reward)
 
-                            next_state, reward, done = [dataset[(step + 1) % L_valid, :2], mu[action], 0]  # cartesian
-
-                            # store experience in memory
-                            new_experience = [state, action, reward, next_state, done]
-                            rewardbuffer.add(new_experience)
-
+                        # update posterior
+                        if  (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
                             # update
-                            state = next_state.copy()
-                            step+= 1
-
-                            # update posterior
-                            if  (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
-                                # update
-                                _ = sess.run(QNet.sample_post,
+                            _ = sess.run(QNet.sample_post,
                                     feed_dict={QNet.context_state: state.reshape(-1,2),
                                                QNet.context_action: action.reshape(-1),
                                                QNet.context_reward: reward.reshape(-1),
                                                QNet.nprec: noise_precision, QNet.is_online: True})
 
-                        if np.sum(np.array(r_star)) < np.sum(np.array(rw)):
-                            print('ERROR !!!')
+                        # update
+                        step += 1
 
-                        cum_rew_QN[ns, sh] = np.sum(np.array(rw))
-                        cum_rew_UF[ns, sh] = np.sum(np.array(r_uni))
-                        cum_rew_ST[ns, sh] = np.sum(np.array(r_star))
+                    cum_rew_QN[sh] = np.sum(np.array(rw))
+                    cum_rew_UF[sh] = np.sum(np.array(r_uni))
+                    cum_rew_ST[sh] = np.sum(np.array(r_star))
 
-                        cum_regr_QN[ns, sh] = np.sum(np.array(r_star)) - np.sum(np.array(rw))
-                        cum_regr_UF[ns, sh] = np.sum(np.array(r_star)) - np.sum(np.array(r_uni))
+                    cum_regr_QN[sh] = np.sum(np.array(r_star)) - np.sum(np.array(rw))
+                    cum_regr_UF[sh] = np.sum(np.array(r_star)) - np.sum(np.array(r_uni))
 
-                    # plot with trajectory
-                    path = dir + 'Epoch_' + str(episode)+ '_observations'
-                    plot_Value_fcn(path, env, sess, QNet, noise_precision, rewardbuffer.buffer)
+                # plot with trajectory
+                #path = dir + 'Epoch_' + str(episode)+ '_observations'
+                #plot_Value_fcn(path, env, sess, QNet, noise_precision, rewardbuffer.buffer)
 
                 # summaries
-                val_rew_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation Reward normalized (delta '+ str(delta_eval)+ ')',
-                                                                     simple_value=np.mean(cum_rew_QN)/ np.mean(cum_rew_ST))])
+                val_rew_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation Reward normalized (delta '+ str(deval)+ ')',
+                                                                         simple_value=np.mean(cum_rew_QN)/ np.mean(cum_rew_ST))])
 
                 summary_writer.add_summary(val_rew_summary, episode)
 
-                regret_valid = np.mean(cum_regr_QN, axis=1) / np.mean(cum_regr_UF, axis=1)* 100
+                regret_valid = cum_regr_QN / cum_regr_UF* 100
                 regret_valid = np.mean(regret_valid)
 
-                tag_name = 'Validation Cumulative Regret (delta '+ str(delta_eval)+ ')'
+                tag_name = 'Validation Cumulative Regret (delta '+ str(deval)+ ')'
 
                 regret_norm_summary = tf.Summary(value=[tf.Summary.Value(tag=tag_name, simple_value=regret_valid)])
                 summary_writer.add_summary(regret_norm_summary, episode)
