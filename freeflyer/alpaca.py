@@ -18,7 +18,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.17)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 9, "Dimensionality of action space")  # only x-y currently
+tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")  # only x-y currently
 tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
 tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
@@ -89,7 +89,7 @@ def action_env(action):
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.
+eps = 0.9
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -187,26 +187,18 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # count reward
         rw = []
 
+        eps = np.max([eps * 0.999, 0.1])
+
         # loop tasks --------------------------------------------------------------------
         for n in range(FLAGS.N_tasks):
             # initialize buffer
             tempbuffer.reset()
 
-            '''
-            # reset environment
-            state = env.reset()
-            goal_state = np.zeros(12)
-            goal_state[0] = 0
-            goal_state[1] = -5
-            goal_state[2] = -0.5
-            env.set_goal_state(goal_state)
-            '''
-
             state = env.reset()
             state = state[:6]
 
             # sample w from prior
-            sess.run([QNet.sample_prior])
+            # sess.run([QNet.sample_prior])
 
             # loop steps
             step = 0
@@ -217,8 +209,15 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
                 action = eGreedyAction(Qval, eps)
 
-                next_state, reward, done = env.step(action_env(action))
-                next_state = next_state
+                if action == 1:
+                    aevn = np.array([-1,1,0])
+                elif action == 2:
+                    aevn = -np.array([-1,1,0])
+                else:
+                    aevn = np.array([0, 0, 0])
+
+                next_state, reward, done = env.step(aevn)
+                next_state = next_state[:6]
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
@@ -228,7 +227,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     env.render()
                     print('(' + str(state[:3]) + ', ' + str(next_state[:3]) + ', ' + str(env.goal_state[:3]) + ', ' + str(reward)+ ')')
                 '''
-                #eps = np.max([eps*0.99998, 0.1])
 
                 # store experience in memory
                 tempbuffer.add(new_experience)

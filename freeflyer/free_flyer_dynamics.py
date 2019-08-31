@@ -293,10 +293,10 @@ class FreeFlyerDynamics:
     def reset_state(self):
         if self.rand_init:
             self.state[0] = np.random.uniform(-10, 10)
-            self.state[1] = np.random.uniform(-10, 10)
+            self.state[1] = 0. #np.random.uniform(-10, 10)
             self.state[2] = 0.
-            self.state[3] = np.random.uniform(-0.5, 0.5)
-            self.state[4] = np.random.uniform(-0.5, 0.5)
+            self.state[3] = 0.#np.random.uniform(-0.5, 0.5)
+            self.state[4] = 0. #np.random.uniform(-0.5, 0.5)
             self.state[5] = 0.
         else:
             self.state = self.start_state.copy()
