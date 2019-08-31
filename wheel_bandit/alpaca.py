@@ -32,8 +32,8 @@ tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
-tf.flags.DEFINE_integer("split_N", 10, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
+tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
@@ -154,7 +154,6 @@ env = wheel_bandit_environment(FLAGS.action_space, FLAGS.random_seed)
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
     QNet = QNetwork(FLAGS, scope='QNetwork')  # neural network
-    Qtarget = QNetwork(FLAGS, scope='TargetNetwork')
 
     # session
     init = tf.global_variables_initializer()
@@ -222,7 +221,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             state = env._sample_state().copy()
 
             # sample w from prior
-            sess.run([QNet.sample_prior])
+            sess.run(QNet.sample_prior)
+            sess.run(QNet.reset_post)
 
             # loop steps
             step = 0
@@ -244,7 +244,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 next_state, reward, done = env._step(action)
 
                 # store experience in memory
-                new_experience = [state, action, reward, next_state, done]
+                new_experience = [state, action, reward]
                 tempbuffer.add(new_experience)
 
                 # actual reward
@@ -252,28 +252,15 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # ----------------------------------------------------------------------
 
-                # update
-                if (step + 1) % FLAGS.update_freq_post == 0 and (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
-                    reward_train = np.zeros([step + 1, ])
-                    state_train = np.zeros([step + 1, FLAGS.state_space])
-                    next_state_train = np.zeros([step + 1, FLAGS.state_space])
-                    action_train = np.zeros([step + 1, ])
-                    done_train = np.zeros([step + 1, 1])
-
-                    # fill arrays
-                    for k, experience in enumerate(tempbuffer.buffer):
-                        # [s, a, r, s', a*, d]
-                        state_train[k] = experience[0]
-                        action_train[k] = experience[1]
-                        reward_train[k] = experience[2]
-                        next_state_train[k] = experience[3]
-                        done_train[k] = experience[4]
+                # update (iterative)
+                if (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
 
                     # update
-                    _, wt_bar = sess.run([QNet.sample_post, QNet.wt_bar],
-                             feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
-                                        QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
-                                        QNet.context_done: done_train, QNet.nprec: noise_precision})
+                    _ = sess.run([QNet.sample_post],
+                             feed_dict={QNet.context_state: state.reshape(-1,2),
+                                        QNet.context_action: action.reshape(-1),
+                                        QNet.context_reward: reward.reshape(-1),
+                                        QNet.nprec: noise_precision, QNet.is_online: True})
 
                 # update state, and counters
                 state = next_state.copy()
@@ -287,8 +274,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # append reward
         reward_episode.append(np.sum(np.array(rw)))
 
+        # ===============================================================================
         # Gradient descent
         for e in range(batch_size):
+
+            sess.run(QNet.reset_post)
 
             # sample from larger buffer [s, a, r, s', d] with current experience not yet included
             experience = fullbuffer.sample(1)
@@ -296,16 +286,12 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
             action_sample = np.zeros((FLAGS.L_episode,))
             reward_sample = np.zeros((FLAGS.L_episode,))
-            next_state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
-            done_sample = np.zeros((FLAGS.L_episode,))
 
             # fill arrays
-            for k, (s0, a, r, s1, d) in enumerate(experience[0]):
+            for k, (s0, a, r) in enumerate(experience[0]):
                 state_sample[k] = s0
                 action_sample[k] = a
                 reward_sample[k] = r
-                next_state_sample[k] = s1
-                done_sample[k] = d
 
                 # split into context and prediction set
                 split = np.int(split_ratio * FLAGS.L_episode * np.random.rand())
@@ -316,44 +302,23 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 state_train = state_sample[train, :]
                 action_train = action_sample[train]
                 reward_train = reward_sample[train]
-                next_state_train = next_state_sample[train, :]
-                done_train = done_sample[train]
 
                 state_valid = state_sample[valid, :]
                 action_valid = action_sample[valid]
                 reward_valid = reward_sample[valid]
-                next_state_valid = next_state_sample[valid, :]
-                done_valid = done_sample[valid]
 
             # XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-            # select amax from online network
-            amax_online = sess.run(QNet.max_action,
-                                   feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
-                                              QNet.context_reward: reward_train,
-                                              QNet.context_state_next: next_state_train,
-                                              QNet.state: state_valid, QNet.state_next: next_state_valid,
-                                              QNet.lr_placeholder: learning_rate,
-                                              QNet.nprec: noise_precision})
-
-            # evaluate target model
-            phi_max_target = sess.run(Qtarget.phi_max,
-                                   feed_dict={Qtarget.context_state: state_train, Qtarget.context_action: action_train,
-                                              Qtarget.context_reward: reward_train,
-                                              Qtarget.context_state_next: next_state_train,
-                                              Qtarget.state: state_valid, Qtarget.state_next: next_state_valid,
-                                              Qtarget.lr_placeholder: learning_rate,
-                                              Qtarget.nprec: noise_precision, Qtarget.amax_online: amax_online})
-
             # update model
-            grads, loss0, Qdiff = sess.run(
-                [QNet.gradients, QNet.loss, QNet.Qdiff],
-                feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
-                           QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
-                           QNet.state: state_valid, QNet.action: action_valid,
-                           QNet.reward: reward_valid, QNet.state_next: next_state_valid,
-                           QNet.done: done_valid,
-                           QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
-                           QNet.phi_max_target: phi_max_target, QNet.amax_online: amax_online})
+            grads, loss0 = sess.run([QNet.gradients, QNet.loss],
+                feed_dict={QNet.context_state: state_train.reshape(-1,2),
+                           QNet.context_action: action_train.reshape(-1),
+                           QNet.context_reward: reward_train.reshape(-1),
+                           QNet.state: state_valid.reshape(-1,2),
+                           QNet.action: action_valid.reshape(-1),
+                           QNet.reward: reward_valid.reshape(-1),
+                           QNet.lr_placeholder: learning_rate,
+                           QNet.nprec: noise_precision,
+                           QNet.is_online: False})
 
             # XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
@@ -411,15 +376,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio + 0.005, 0.9])
-
-        # ===============================================================
-        # update target network
-        if episode % FLAGS.update_freq_target == 0:
-            vars_modelQ = sess.run(QNet.tvars)
-            feed_dict = dictionary = dict(zip(Qtarget.variable_holders, vars_modelQ))
-            feed_dict.update({Qtarget.tau: FLAGS.tau})
-            sess.run(Qtarget.copyParams, feed_dict=feed_dict)
+            split_ratio = np.min([split_ratio + 0.01, 0.9])
 
         # ===============================================================
         # print to console
@@ -485,6 +442,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                         # sample w from prior
                         sess.run([QNet.sample_prior])
+                        sess.run(QNet.reset_post)
 
                         while step < L_valid:
                             # --------------------------------------
@@ -517,28 +475,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                             step+= 1
 
                             # update posterior
-                            if (step + 1) % FLAGS.update_freq_post == 0 and (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
-                                reward_train = np.zeros([step + 1, ])
-                                state_train = np.zeros([step + 1, FLAGS.state_space])
-                                next_state_train = np.zeros([step + 1, FLAGS.state_space])
-                                action_train = np.zeros([step + 1, ])
-                                done_train = np.zeros([step + 1, 1])
-
-                                # fill arrays
-                                for k, experience in enumerate(rewardbuffer.buffer):
-                                    # [s, a, r, s', a*, d]
-                                    state_train[k] = experience[0]
-                                    action_train[k] = experience[1]
-                                    reward_train[k] = experience[2]
-                                    next_state_train[k] = experience[3]
-                                    done_train[k] = experience[4]
-
+                            if  (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
                                 # update
                                 _ = sess.run(QNet.sample_post,
-                                    feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
-                                               QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
-                                               QNet.context_done: done_train,
-                                               QNet.nprec: noise_precision})
+                                    feed_dict={QNet.context_state: state.reshape(-1,2),
+                                               QNet.context_action: action.reshape(-1),
+                                               QNet.context_reward: reward.reshape(-1),
+                                               QNet.nprec: noise_precision, QNet.is_online: True})
 
                         if np.sum(np.array(r_star)) < np.sum(np.array(rw)):
                             print('ERROR !!!')

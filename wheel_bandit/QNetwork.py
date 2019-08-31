@@ -79,15 +79,13 @@ class QNetwork():
         #
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
-        #self.cprec = tf.placeholder(shape=[], dtype=tf.float32, name='cprec')
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
+
         self.is_online = tf.placeholder_with_default(False, shape=[], name='is_online')
 
         # placeholders context data =======================================================
         self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
-        self.context_state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
         self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
-        self.context_done = tf.placeholder(shape=[None, 1], dtype=tf.float32, name='done')
         self.context_reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
 
         # append action s.t. it is an input to the network
@@ -95,16 +93,13 @@ class QNetwork():
         context_action_augm = tf.range(self.action_dim, dtype=tf.int32)
         context_action_augm = tf.tile(context_action_augm, [bsc])
         context_state = self.state_trafo(self.context_state, context_action_augm)
-        context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
 
         # latent representation
         self.context_phi = self.model(context_state, context_action_augm)  # latent space
-        self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
 
         # placeholders predictive data ====================================================
         ## prediction data
         self.state = tf.placeholder(shape=[None, self.state_dim], dtype = tf.float32, name='state') # input
-        self.state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
         self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
         self.done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
         self.reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
@@ -114,11 +109,9 @@ class QNetwork():
         action_augm = tf.range(self.action_dim, dtype=tf.int32)
         action_augm = tf.tile(action_augm, [bs])
         state = self.state_trafo(self.state, action_augm)
-        state_next = self.state_trafo(self.state_next, action_augm)
 
         # latent representation
         self.phi = self.model(state, action_augm) # latent space
-        self.phi_next = self.model(state_next, action_augm)  # latent space
 
         # noise variance
         self.Sigma_e_context = 1. / self.nprec * tf.ones(bsc, name='noise_precision')
@@ -127,7 +120,7 @@ class QNetwork():
         # output layer (Bayesian) =========================================================
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
-        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
+        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim), trainable=False)  # cholesky
         L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
         self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
@@ -142,44 +135,38 @@ class QNetwork():
         phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
 
         # update posterior if there is data
-        self.wt_bar, self.Lt_inv = tf.cond(bsc > 0,
-                                           lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken,
-                                                                       self.context_reward),
-                                           lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+        self.wt_bar = tf.get_variable('wt_bar', initializer=self.w0_bar, trainable=False)
+        self.Lt_inv = tf.get_variable('Lt_inv', initializer=tf.linalg.inv(self.L0), trainable=False)
+        self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
+
+        wt_bar, Lt_inv = tf.cond(bsc > 0,
+                                 lambda: tf.cond(self.is_online,
+                                                 lambda: self._update_posterior_online(self.context_phi_taken, self.context_reward),
+                                                 lambda: self._update_posterior(self.context_phi_taken, self.context_reward)),
+                                 lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+
+        self.w_assign = tf.assign(self.wt_bar, wt_bar)
+        self.L_assign = tf.assign(self.Lt_inv, Lt_inv)
 
         self.sample_prior = self._sample_prior()
-        self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
+        with tf.control_dependencies([self.w_assign, self.L_assign]):
+            self.sample_post = self._sample_posterior(wt_bar, Lt_inv)
+        self.reset_post = self._reset_posterior()
 
         # loss function ==================================================================
         # current state -------------------------------------
-        self.Q = tf.einsum('im,bi->b', self.wt_bar, phi_taken, name='Q')
+        self.Q = tf.einsum('im,bi->b', wt_bar, phi_taken, name='Q')
 
         # next state ----------------------------------------
-        Qnext = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi_next, name='Qnext')
-        self.max_action = tf.one_hot(tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
-
-        self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
-        self.phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
-
-        self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='Qmax_target')
-        '''
-        phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.max_action), axis=2)
-        phi_max = tf.einsum('b,ba->ba', (tf.ones(bs, ) - self.done), phi_max)
-        phi_max = tf.stop_gradient(phi_max)
-        '''
-
-        self.Qmax_target = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
-
-        self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_target)
+        self.Qtarget = self.reward
 
         # Q(s',a*)+ r- Q(s,a)
         self.Qdiff = self.Qtarget - self.Q
 
         # predictive covariance
+        self.phi_hat = phi_taken
 
-        self.phi_hat = phi_taken - self.gamma * self.phi_max_target
-
-        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat,
+        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, Lt_inv, self.phi_hat,
                                name='Sigma_pred') + self.Sigma_e  # column vector
         logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred))
 
@@ -261,39 +248,39 @@ class QNetwork():
         Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0
         Lt_inv = tf.linalg.inv(Lt) # posterior variance
         wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
-                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
+                          self.nprec*tf.matmul(tf.transpose(phi_hat), tf.reshape(reward, [-1, 1]))
         wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean
 
         return wt_bar, Lt_inv
 
-    def _max_posterior(self, phi_next, phi_taken, reward):
-        ''' determine wt_bar for calculating phi(s_{t+1}, a*) '''
-        # determine phi(max_action) based on Q determined by sampling wt from prior
-        Q_next = tf.einsum('ijk,jl->ik', phi_next, self.w0_bar)
-        max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
-        phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
+    def _update_posterior_online(self, phi_hat, reward):
+        # variance
+        denum = 1./self.nprec + tf.einsum('bi,ij,bj->b', phi_hat, self.Lt_inv, phi_hat)
+        denum = tf.reciprocal(denum)
 
-        # iterations
-        for _ in range(self.iter_amax):
-            #
-            phi_hat = phi_taken - self.gamma* phi_max
+        num = tf.einsum('ij,bj->bi', self.Lt_inv, phi_hat)
+        num = tf.einsum('bi,bj->bij', num, num)
 
-            # update posterior distributior
-            wt_bar, Lt_inv = self._update_posterior(phi_hat, reward)
+        Lt_inv = self.Lt_inv - tf.einsum('b,bij->ij', denum, num)
 
-            # determine phi(max_action) based on Q determined by sampling wt from posterior
-            Q_next = tf.einsum('i,jik->jk', tf.reshape(wt_bar, [-1]), phi_next)
-            max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
-            phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
+        # mean
+        wt_unnorm = self.wt_unnorm + self.nprec * tf.reshape(tf.einsum('bi,b->i', phi_hat, reward), [-1, 1])  # XXXXXXXXXx
+        update_op = tf.assign(self.wt_unnorm, wt_unnorm)
 
-        # stop gradient through context
-        phi_max = tf.stop_gradient(phi_max)
-        phi_hat = phi_taken - self.gamma * phi_max
-
-        # update posterior distribution
-        wt_bar, Lt_inv = self._update_posterior(phi_hat, reward)
+        with tf.control_dependencies([update_op]):
+            wt_bar = tf.matmul(Lt_inv, wt_unnorm)
 
         return wt_bar, Lt_inv
+
+    def _reset_posterior(self):
+        update_op0 = tf.assign(self.wt_bar, self.w0_bar)
+        update_op1 = tf.assign(self.Lt_inv, tf.linalg.inv(self.L0))
+        update_op2 = tf.assign(self.wt_unnorm, tf.matmul(self.L0, self.w0_bar))
+
+        update_op = tf.group([update_op0, update_op1, update_op2])
+
+        return update_op
+
 
     def copy_params(self):
         # copy parameters
