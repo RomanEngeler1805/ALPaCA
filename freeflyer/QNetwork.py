@@ -91,8 +91,7 @@ class QNetwork():
         self.context_reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
 
         # append action s.t. it is an input to the network
-        #(bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
-        bsc = tf.constant(0)
+        (bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
         context_action_augm = tf.range(self.action_dim, dtype=tf.int32)
         context_action_augm = tf.tile(context_action_augm, [bsc])
         context_state = self.state_trafo(self.context_state, context_action_augm)
@@ -148,7 +147,7 @@ class QNetwork():
                                                                        self.context_reward),
                                            lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
 
-        self.Qout = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi, name='Qout')
+        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
 
         self.sample_prior = self._sample_prior()
         self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
@@ -198,7 +197,7 @@ class QNetwork():
         self.loss2 = logdet_Sigma
 
         # tf.losses.huber_loss(labels, predictions, delta=100.)
-        self.loss = self.loss0 #self.loss1+ self.loss2
+        self.loss = self.loss0#self.loss1+ self.loss2
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)

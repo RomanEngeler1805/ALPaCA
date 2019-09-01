@@ -18,7 +18,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.17)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")  # only x-y currently
+tf.flags.DEFINE_integer("action_space", 9, "Dimensionality of action space")  # only x-y currently
 tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
 tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
@@ -187,7 +187,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # count reward
         rw = []
 
-        eps = np.max([eps * 0.999, 0.1])
+        eps = np.max([eps * 0.9993, 0.1])
 
         # loop tasks --------------------------------------------------------------------
         for n in range(FLAGS.N_tasks):
@@ -209,15 +209,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
                 action = eGreedyAction(Qval, eps)
 
-                if action == 1:
-                    aevn = np.array([-1,1,0])
-                elif action == 2:
-                    aevn = -np.array([-1,1,0])
-                else:
-                    aevn = np.array([0, 0, 0])
-
-                next_state, reward, done = env.step(aevn)
-                next_state = next_state[:6]
+                next_state, reward, done = env.step(action_env(action))
+                next_state = next_state
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
