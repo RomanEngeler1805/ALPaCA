@@ -288,6 +288,8 @@ class FreeFlyerDynamics:
             # self.state = self.start_state.copy()
             self.reset_state()
 
+        self.f_upper = 3.+2.*np.random.rand()
+
         return self.observation(self.state)
 
     def reset_state(self):

@@ -24,8 +24,8 @@ tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.99, "Discount factor")
 
-tf.flags.DEFINE_float("learning_rate", 1e-3, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.0005, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 1.0, "Noise precision (1/var)")
@@ -44,7 +44,7 @@ tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
 
-tf.flags.DEFINE_float("tau", 0.001, "Update speed of target network")
+tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
@@ -89,7 +89,7 @@ def action_env(action):
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.9
+eps = 0.
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -187,8 +187,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # count reward
         rw = []
 
-        eps = np.max([eps * 0.9993, 0.1])
-
         # loop tasks --------------------------------------------------------------------
         for n in range(FLAGS.N_tasks):
             # initialize buffer
@@ -198,7 +196,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             state = state[:6]
 
             # sample w from prior
-            # sess.run([QNet.sample_prior])
+            sess.run([QNet.sample_prior])
 
             # loop steps
             step = 0

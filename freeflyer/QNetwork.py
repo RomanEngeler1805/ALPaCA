@@ -133,6 +133,7 @@ class QNetwork():
 
         self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
 
+        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
 
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
@@ -146,8 +147,6 @@ class QNetwork():
                                            lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken,
                                                                        self.context_reward),
                                            lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
-
-        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
 
         self.sample_prior = self._sample_prior()
         self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
@@ -197,7 +196,7 @@ class QNetwork():
         self.loss2 = logdet_Sigma
 
         # tf.losses.huber_loss(labels, predictions, delta=100.)
-        self.loss = self.loss0#self.loss1+ self.loss2
+        self.loss = self.loss1+ self.loss2
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
