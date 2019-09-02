@@ -19,12 +19,12 @@ tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
-tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 500, "Length of episodes")
 
 tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.9, "Initial split ratio for conditioning")
@@ -45,13 +45,14 @@ from wheel_bandit_environment import wheel_bandit_environment
 env = wheel_bandit_environment(FLAGS.action_space, FLAGS.random_seed)
 
 # load tf model
-model_dir = './model/14-32-29_08-19/'
+model_name = '14-22-31_08-19'
+model_dir = './model/'+ model_name+ '/'
 
 #
 # sample dataset
 num_contexts = 80000
 num_datasets = 50
-batch_size = 50
+batch_size = 1000
 
 num_actions = 5
 context_dim = 2
@@ -63,7 +64,8 @@ std_large = 0.01
 delta = 0.9
 
 # Create Session
-with tf.Session() as sess:
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.32)
+with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     QNet = QNetwork(FLAGS)
     Qeval = Qeval(FLAGS)
 
@@ -104,6 +106,7 @@ with tf.Session() as sess:
             rewards = np.zeros(num_contexts)
 
             # sample prior (reset for new evaluation)
+            sess.run(QNet.reset_post)
             sess.run(Qeval.sample_prior)
 
             # loop over dataset
@@ -114,7 +117,8 @@ with tf.Session() as sess:
                             feed_dict={Qeval.context_phi: phi[data_idx[:i]],
                                     Qeval.context_action: actions[:i],
                                     Qeval.context_reward: rewards[:i],
-                                    Qeval.nprec: FLAGS.noise_precision})
+                                    Qeval.nprec: FLAGS.noise_precision,
+                                    Qeval.is_online: True})
 
                 # prediction
                 Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
@@ -140,30 +144,33 @@ with tf.Session() as sess:
                 rew_rand[shuffle] += np.sum(dataset[data_idx[i:i+batch_size], 2 + np.random.randint(0, 5, size=np.min([batch_size, num_contexts-i]))])  # first two entries are state
 
         # print reward
-        print('===================================')
-        print('=========== delta = '+ str(delta) +' ==========')
-        print('Reward LSTD: ')
-        print('{:6.2f} +- {:5.2f} ({:2.0f} %)'.format(np.mean(rew_agent),
+        file = open(model_name, 'a')
+        file.write('===================================\n')
+        file.write('=========== delta = '+ str(delta) +' ==========\n')
+        file.write('Reward LSTD: \n')
+        file.write('{:6.2f} +- {:5.2f} ({:2.0f} %)\n'.format(np.mean(rew_agent),
                                             np.std(rew_agent),
                                             np.std(rew_agent)/np.mean(rew_agent)* 100.))
 
         #print('Frequency of actions: ')
         #print(['({:1d}: {:6d}) '.format(idx, a) for idx, a in enumerate(actions)])
 
-        print('-----------------------------------')
-        print('Random Reward: ')
-        print('{:6}'.format(np.mean(rew_rand)))
+        file.write('-----------------------------------\n')
+        file.write('Random Reward: \n')
+        file.write('{:6}\n'.format(np.mean(rew_rand)))
 
-        print('-----------------------------------')
-        print('Optimal Reward: ')
-        print('{:6}'.format(np.sum(opt_wheel[0])))
+        file.write('-----------------------------------\n')
+        file.write('Optimal Reward: \n')
+        file.write('{:6}\n'.format(np.sum(opt_wheel[:, 0])))
 
-        print('-----------------------------------')
-        print('Regret: ')
-        print('{:3.2f}% +- {:2.2f}%'.format(100.*(np.sum(opt_wheel[0])-np.mean(rew_agent))/
-                                        (np.sum(opt_wheel[0])-np.mean(rew_rand)),
-                                         100.*np.std(rew_agent)/(np.sum(opt_wheel[0])-np.mean(rew_rand))))
+        file.write('-----------------------------------\n')
+        file.write('Regret: \n')
+        file.write('{:3.2f}% +- {:2.2f}%\n'.format(100.*(np.sum(opt_wheel[:,0])-np.mean(rew_agent))/
+                                        (np.sum(opt_wheel[:,0])-np.mean(rew_rand)),
+                                         100.*np.std(rew_agent)/(np.sum(opt_wheel[:,0])-np.mean(rew_rand))))
 
-        print('-----------------------------------')
-        print('Time for evaluation: {:5f}'.format(time.time() - start))
-        print('===================================')
+        file.write('-----------------------------------\n')
+        file.write('Time for evaluation: {:5f}\n'.format(time.time() - start))
+        file.write('===================================\n')
+
+        file.close()

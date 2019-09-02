@@ -21,6 +21,8 @@ class Qeval():
         ''' constructing tensorflow model '''
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
 
+        self.is_online = tf.placeholder_with_default(False, shape=[], name='is_online')
+
         # placeholders context data =======================================================
         self.context_phi = tf.placeholder(shape=[None, self.latent_dim, self.action_dim], dtype=tf.float32, name='context_phi')  # input
         self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
@@ -56,13 +58,25 @@ class Qeval():
         self.context_phi_taken = tf.reduce_sum(tf.multiply(self.context_phi, context_taken_action), axis=2)
 
         # update posterior if there is data
-        self.wt_bar, self.Lt_inv = tf.cond(bsc > 0,
-                                           lambda: self._update_posterior(self.context_phi_taken,
-                                                                       self.context_reward),
-                                           lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+        self.wt_bar = tf.get_variable('wt_bar', initializer=self.w0_bar, trainable=False)
+        self.Lt_inv = tf.get_variable('Lt_inv', initializer=tf.linalg.inv(self.L0), trainable=False)
+        self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
+
+        wt_bar, Lt_inv = tf.cond(bsc > 0,
+                                 lambda: tf.cond(self.is_online,
+                                                 lambda: self._update_posterior_online(self.context_phi_taken,
+                                                                                       self.context_reward),
+                                                 lambda: self._update_posterior(self.context_phi_taken,
+                                                                                self.context_reward)),
+                                 lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+
+        self.w_assign = tf.assign(self.wt_bar, wt_bar)
+        self.L_assign = tf.assign(self.Lt_inv, Lt_inv)
 
         self.sample_prior = self._sample_prior()
-        self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
+        with tf.control_dependencies([self.w_assign, self.L_assign]):
+            self.sample_post = self._sample_posterior(wt_bar, Lt_inv)
+        self.reset_post = self._reset_posterior()
 
     def _sample_prior(self):
         ''' sample wt from prior '''
@@ -95,3 +109,31 @@ class Qeval():
         wt_bar = tf.matmul(Lt_inv, wt_unnormalized)  # posterior mean
 
         return wt_bar, Lt_inv
+
+    def _update_posterior_online(self, phi_hat, reward):
+        # variance
+        denum = 1./self.nprec + tf.einsum('bi,ij,bj->b', phi_hat, self.Lt_inv, phi_hat)
+        denum = tf.reciprocal(denum)
+
+        num = tf.einsum('ij,bj->bi', self.Lt_inv, phi_hat)
+        num = tf.einsum('bi,bj->bij', num, num)
+
+        Lt_inv = self.Lt_inv - tf.einsum('b,bij->ij', denum, num)
+
+        # mean
+        wt_unnorm = self.wt_unnorm + self.nprec * tf.reshape(tf.einsum('bi,b->i', phi_hat, reward), [-1, 1])  # XXXXXXXXXx
+        update_op = tf.assign(self.wt_unnorm, wt_unnorm)
+
+        with tf.control_dependencies([update_op]):
+            wt_bar = tf.matmul(Lt_inv, wt_unnorm)
+
+        return wt_bar, Lt_inv
+
+    def _reset_posterior(self):
+        update_op0 = tf.assign(self.wt_bar, self.w0_bar)
+        update_op1 = tf.assign(self.Lt_inv, tf.linalg.inv(self.L0))
+        update_op2 = tf.assign(self.wt_unnorm, tf.matmul(self.L0, self.w0_bar))
+
+        update_op = tf.group([update_op0, update_op1, update_op2])
+
+        return update_op

@@ -1,3 +1,24 @@
 #!/bin/bash
 echo "==================="
-python alpaca.py --non_linearity='sigm' --learning_rate=5e-4 --noise_precision=2.5 --noise_precmax=3.0
+rs1=1234
+rs2=2345
+python alpaca.py --non_linearity='leaky_relu' --random_seed=$rs1 &
+sleep 1m
+python alpaca.py --non_linearity='leaky_relu' --random_seed=$rs2
+wait
+python alpaca.py --update_freq_target=1 --tau=0.1 --random_seed=$rs1 &
+sleep 1m
+python alpaca.py --update_freq_target=1 --tau=0.1 --random_seed=$rs2
+wait
+python alpaca.py --update_freq_target=1 --tau=0.01 --random_seed=$rs1 &
+sleep 1m
+python alpaca.py --update_freq_target=1 --tau=0.01 --random_seed=$rs2
+wait
+python alpaca.py --L_episode=280 --num_datasets=128 --random_seed=$rs1 &
+sleep 1m
+python alpaca.py --L_episode=280 --num_datasets=128 --random_seed=$rs2
+wait
+python alpaca.py --split_ratio_max=0.5 --random_seed=$rs1 &
+sleep 1m
+python alpaca.py --split_ratio_max=0.5 --random_seed=$rs2
+wait

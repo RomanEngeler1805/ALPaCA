@@ -165,4 +165,4 @@ def sample_wheel_bandit_data(num_contexts, delta, mean_v, std_v,
   opt_rewards = np.array(opt_rewards)
   opt_actions = np.array(opt_actions)
 
-  return np.hstack((contexts, rewards)), (opt_rewards, opt_actions)
+  return np.hstack((contexts, rewards)), np.hstack((opt_rewards.reshape(-1,1), opt_actions.reshape(-1,1)))

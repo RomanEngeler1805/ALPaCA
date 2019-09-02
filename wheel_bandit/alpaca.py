@@ -13,7 +13,7 @@ import pandas as pd
 import sys
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.16)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.20)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
@@ -34,6 +34,7 @@ tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 512./562, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
@@ -41,7 +42,8 @@ tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
 tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 562, "Length of episodes")
+tf.flags.DEFINE_integer("num_datasets", 64, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 20, "Update frequency of target network")
@@ -79,26 +81,6 @@ def eGreedyAction(x, epsilon=0.):
 
     return action
 
-def quadrant(pos, delta):
-    quad = 0
-
-    if np.linalg.norm(pos) < delta:
-        quad = 0
-    else:
-        if pos[0] > 0 and pos[1] > 0:
-            quad = 1
-        elif pos[0] < 0 and pos[1] > 0:
-            quad = 2
-        elif pos[0] < 0 and pos[1] < 0:
-            quad = 3
-        elif pos[0] > 0 and pos[1] < 0:
-            quad = 4
-        else:
-            return -1
-
-    return quad
-
-
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
@@ -134,9 +116,9 @@ if not os.path.exists(saver_dir):
     os.makedirs(saver_dir)
 
 # folder for plotting --------------------------------------------------------------------
-histo_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/histo/'
-if not os.path.exists(histo_dir):
-    os.makedirs(histo_dir)
+V_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/Valuefcn/'
+if not os.path.exists(V_dir):
+    os.makedirs(V_dir)
 
 reward_dir = 'figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/'
 if not os.path.exists(reward_dir):
@@ -151,7 +133,7 @@ log.info('Build Tensorflow Graph')
 # ======= Dataset Generation ===========
 from synthetic_data_sampler import sample_wheel_bandit_data
 num_contexts = FLAGS.L_episode
-num_datasets = 64
+num_datasets = FLAGS.num_datasets
 
 num_actions = 5
 context_dim = 2
@@ -202,7 +184,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     summary_writer = tf.summary.FileWriter(logdir=os.path.join('./', 'summaries/', time.strftime('%H-%M-%d_%m-%y')), graph=sess.graph)
 
     # initialize
-    global_index = 0 # counter
     learning_rate = FLAGS.learning_rate
     noise_precision = FLAGS.noise_precision
 
@@ -240,7 +221,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         # count reward
         rw = []
-        r_star = []
+        r_star = 0.
         r_uni = []
 
         # loop tasks --------------------------------------------------------------------
@@ -248,34 +229,31 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # initialize buffer
             tempbuffer.reset()
 
-            # sample theta (i.e. bandit)
-            env._sample_env()
+            # sample mdp (theta) and shuffle context
+            mdp = np.random.randint(len(deltas_train))
+            shuffle_idx = np.random.permutation(np.arange(num_contexts))
+            dataset_train[mdp] = dataset_train[mdp, shuffle_idx, :]
+            opt_wheel_train[mdp] = opt_wheel_train[mdp, shuffle_idx, :]
 
-            # resample state
-            state = env._sample_state().copy()
+            r_star += np.sum(opt_wheel_train[mdp])
 
-            # sample w from prior
-            sess.run(QNet.sample_prior)
+            # reset posterior and sample from prior
             sess.run(QNet.reset_post)
+            sess.run(QNet.sample_prior)
 
             # loop steps
             step = 0
 
             while step < FLAGS.L_episode:
-
-                # max reward (neglect stdv)
-                r_star.append(np.max(env.mu[env._mu_idx(env.state)]))
+                state = dataset_train[mdp, step, :2]
 
                 # uniform reward
-                if np.linalg.norm(env.state) <= env.delta:
-                    r_uni.append(1./5.* env.mu[0]+ 4./5.* env.mu[1])
-                else:
-                    r_uni.append(1./5.* env.mu[0]+ 3./5.* env.mu[1]+ 1./5.* env.mu[2])
+                r_uni.append(dataset_train[mdp,step, 2+ np.random.randint(5)])
 
                 # take a step
                 Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
                 action = eGreedyAction(Qval, eps)
-                next_state, reward, done = env._step(action)
+                reward = dataset_train[mdp,step,2+ action]
 
                 # store experience in memory
                 new_experience = [state, action, reward]
@@ -285,7 +263,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 rw.append(reward)
 
                 # ----------------------------------------------------------------------
-
                 # update (iterative)
                 if (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
 
@@ -297,8 +274,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                         QNet.nprec: noise_precision, QNet.is_online: True})
 
                 # update state, and counters
-                state = next_state.copy()
-                global_index += 1
                 step += 1
 
                 # -----------------------------------------------------------------------
@@ -327,19 +302,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 action_sample[k] = a
                 reward_sample[k] = r
 
-                # split into context and prediction set
-                split = np.int(split_ratio * FLAGS.L_episode * np.random.rand())
+            # split into context and prediction set
+            split = np.int(split_ratio * FLAGS.L_episode * np.random.rand())
 
-                train = np.arange(0, split)
-                valid = np.arange(split, FLAGS.L_episode)
+            train = np.arange(0, split)
+            valid = np.arange(split, FLAGS.L_episode)
 
-                state_train = state_sample[train, :]
-                action_train = action_sample[train]
-                reward_train = reward_sample[train]
+            state_train = state_sample[train, :]
+            action_train = action_sample[train]
+            reward_train = reward_sample[train]
 
-                state_valid = state_sample[valid, :]
-                action_valid = action_sample[valid]
-                reward_valid = reward_sample[valid]
+            state_valid = state_sample[valid, :]
+            action_valid = action_sample[valid]
+            reward_valid = reward_sample[valid]
 
             # XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             # update model
@@ -356,12 +331,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
-
             for idx, grad in enumerate(grads): # grad[0] is gradient and grad[1] the variable itself
                 gradBuffer[idx] += (grad[0]/ batch_size)
 
             lossBuffer += loss0
-
 
         # update summary
         feed_dict = dictionary = dict(zip(QNet.gradient_holders, gradBuffer))
@@ -372,8 +345,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # update summary
             _, summaries_gradvar = sess.run([QNet.updateModel, QNet.summaries_gradvar], feed_dict=feed_dict)
 
-            #summaries_var = sess.run(Qtarget.summaries_var)
-
             loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss', simple_value=(lossBuffer / batch_size))])
             reward_norm_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Reward (Normalized)', simple_value=np.sum(np.array(rw)) / np.sum(np.array(r_star)))])
             regret_norm_summary = tf.Summary(value=[tf.Summary.Value(tag='Episodic Regret (normalized)',
@@ -383,7 +354,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             summary_writer.add_summary(loss_summary, episode)
             summary_writer.add_summary(reward_norm_summary, episode)
             summary_writer.add_summary(regret_norm_summary, episode)
-            #summary_writer.add_summary(summaries_var, episode)
             summary_writer.add_summary(summaries_gradvar, episode)
             summary_writer.add_summary(learning_rate_summary, episode)
 
@@ -410,7 +380,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio + 0.01, 0.9])
+            split_ratio = np.min([split_ratio + 0.01, FLAGS.split_ratio_max])
 
         # ===============================================================
         # print to console
@@ -435,13 +405,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 cum_rew_ST = np.zeros([n_shuffle])
 
                 # ----------------------------------------------------------------------------------------------
-                '''
-                dir = histo_dir + '/' + str(np.int(100 * delta_eval)) + '/'
+
+                dir = V_dir + '/' + str(np.int(100 * deval)) + '/'
                 if not os.path.exists(dir):
                     os.makedirs(dir)
                 path = dir + 'Epoch_' + str(episode)
-                plot_Value_fcn(path, env, sess, QNet, noise_precision)
-                '''
+                plot_Value_fcn(path, deval, sess, QNet, noise_precision)
+
                 # -----------------------------------------------------------------------------------------------
 
                 for sh in range(n_shuffle):
@@ -455,6 +425,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     r_star = 0
                     r_uni = []
 
+                    actions = []
+
                     # loop steps
                     step = 0
 
@@ -465,7 +437,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     r_star += np.sum(opt_wheel_eval[de, :, 0])
 
                     while step < num_contexts:
-
                         state = dataset_eval[de, step, :2]
 
                         # uniform reward
@@ -475,7 +446,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1, FLAGS.state_space)})
                         action = eGreedyAction(Qval, eps)
 
-                        #action =
+                        actions.append(action)
 
                         reward = dataset_eval[de,step, 2+ action]
 
@@ -502,20 +473,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     cum_regr_UF[sh] = np.sum(np.array(r_star)) - np.sum(np.array(r_uni))
 
                 # plot with trajectory
-                #path = dir + 'Epoch_' + str(episode)+ '_observations'
-                #plot_Value_fcn(path, env, sess, QNet, noise_precision, rewardbuffer.buffer)
+                path = dir + 'Epoch_' + str(episode)+ '_observations'
+                buff = [dataset_eval[de, :,:2], np.asarray(actions), np.asarray(rw)]
+                plot_Value_fcn(path, deval, sess, QNet, noise_precision, buff)
 
                 # summaries
                 val_rew_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation Reward normalized (delta '+ str(deval)+ ')',
                                                                          simple_value=np.mean(cum_rew_QN)/ np.mean(cum_rew_ST))])
-
                 summary_writer.add_summary(val_rew_summary, episode)
 
                 regret_valid = cum_regr_QN / cum_regr_UF* 100
                 regret_valid = np.mean(regret_valid)
 
                 tag_name = 'Validation Cumulative Regret (delta '+ str(deval)+ ')'
-
                 regret_norm_summary = tf.Summary(value=[tf.Summary.Value(tag=tag_name, simple_value=regret_valid)])
                 summary_writer.add_summary(regret_norm_summary, episode)
 
