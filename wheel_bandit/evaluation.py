@@ -27,7 +27,7 @@ tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 tf.flags.DEFINE_integer("L_episode", 500, "Length of episodes")
 
 tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.9, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.91, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
@@ -45,7 +45,7 @@ from wheel_bandit_environment import wheel_bandit_environment
 env = wheel_bandit_environment(FLAGS.action_space, FLAGS.random_seed)
 
 # load tf model
-model_name = '14-22-31_08-19'
+model_name = '12-23-01_09-19'
 model_dir = './model/'+ model_name+ '/'
 
 #
