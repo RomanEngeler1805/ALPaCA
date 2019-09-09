@@ -26,8 +26,10 @@ def get_session():
     tf_config = tf.ConfigProto(
         inter_op_parallelism_threads=0,
         intra_op_parallelism_threads=0)
+
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.32)
     tf_config.gpu_options.allow_growth=True
-    session = tf.Session(config=tf_config)
+    session = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
     return session
 
 def minimize_and_clip(optimizer, objective, var_list, clip_val=10):

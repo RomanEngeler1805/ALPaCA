@@ -11,13 +11,15 @@ class LSTMPolicy:
 		hidden_dim=256,
 		activation=tf.nn.relu):
 
+		# parameters
 		self.scope = scope
 		self.hidden_dim = hidden_dim
 		self.activation_fn = activation
 		self.action_dim = action_dim
 
 		with tf.variable_scope(self.scope):
-			lstm = tf.contrib.rnn.BasicLSTMCell(self.hidden_dim, state_is_tuple=True, activation=self.activation_fn)
+			# initialize lstm cell
+			lstm = tf.contrib.rnn.LSTMCell(self.hidden_dim, state_is_tuple=True, activation=self.activation_fn)
 			self.c_init = np.zeros((1, lstm.state_size.c), np.float32)
 			self.h_init = np.zeros((1, lstm.state_size.h), np.float32)
 
@@ -30,15 +32,18 @@ class LSTMPolicy:
 				sequence_length=tf.shape(inputs)[:1],
 				time_major=False
 			)
+			# extract lstm internal state
 			lstm_c, lstm_h = lstm_state
 			self.c_out = lstm_c[:1, :]
 			self.h_out = lstm_h[:1, :]
 			lstm_out_flat = tf.reshape(lstm_out, [-1, self.hidden_dim])
 
+			# policy and value function
 			self._pi = layers.fully_connected(lstm_out_flat, num_outputs=self.action_dim, activation_fn=None)
 			self._v = layers.fully_connected(lstm_out_flat, num_outputs=1, activation_fn=None)
 			self._variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.scope)
 
+		# copy state
 		self.prev_c = self.c_init.copy()
 		self.prev_h = self.h_init.copy()
 
