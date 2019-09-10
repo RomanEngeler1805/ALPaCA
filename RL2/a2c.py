@@ -11,7 +11,7 @@ class A2C:
         scope,
         policy_cls,
         hidden_dim=256,
-        action_dim=10,
+        action_dim=3,
         encode_state=False,
         grad_clip=10):
 
@@ -20,7 +20,7 @@ class A2C:
         self.action_dim = 1
         self.vf_ceof = 0.05
         self.ent_coef = 0.01
-        self.step_size = 1e-3
+        self.step_size = 2e-4
         self.session = session
 
         #TODO: make sure to use encode_state when moving to vision domains
@@ -43,7 +43,9 @@ class A2C:
         # loss
         neglogpi = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.policy.pi, labels=self.A)
 
+        # policy gradient loss?
         self.pg_loss = tf.reduce_mean(self.ADV * neglogpi)
+        # value function loss?
         self.vf_loss = tf.reduce_mean(tf.square(tf.squeeze(self.policy.V) - self.R) / 2.)
 
         a0 = self.policy.pi - tf.reduce_max(self.policy.pi, 1, keepdims=True)
@@ -73,11 +75,10 @@ class A2C:
         if not self.policy.recurrent:
             actions, values = self.session.run([self.act, self.policy.V], feed_dict={self.X: X})
         else:
-            actions, values, c_out, h_out = self.session.run([self.act, self.policy.V, self.policy.c_out, self.policy.h_out],
+            print(X.shape)
+            actions, values, h_out = self.session.run([self.act, self.policy.V, self.policy.h_out],
                 feed_dict={self.X: X, self.Aold: A, self.Rold: R,
-                self.policy.c_in: self.policy.prev_c,
                 self.policy.h_in: self.policy.prev_h})
-            self.policy.prev_c = c_out # keep track of RNN internal hidden state
             self.policy.prev_h = h_out
         return actions, values
 
@@ -93,12 +94,11 @@ class A2C:
         # TODO TRPO optimizer
         # TODO tensorboard summaries
         # TODO GRU cells
-        self.step_size*= 0.9999
+        self.step_size*= 0.9995
 
         train_dict = {self.X: ep_X[1:], self.ADV: ep_adv[1:], self.A: ep_A[1:], self.R: ep_R[1:],
                       self.Aold: ep_A[:-1], self.Rold: ep_R[:-1]}
         if self.policy.recurrent:
-            train_dict[self.policy.c_in] = self.policy.c_init
             train_dict[self.policy.h_in] = self.policy.h_init
         pLoss, vLoss, Vfcn, ent, _ = self.session.run([self.pg_loss, self.vf_loss, self.policy.V, self.entropy, self.train_op],
 			feed_dict=train_dict)
@@ -122,7 +122,6 @@ class A2C:
 
     def observe_V(self, X, A, R):
         train_dict = {self.X: X, self.Aold: A, self.Rold: R}
-        train_dict[self.policy.c_in] = self.policy.c_init
         train_dict[self.policy.h_in] = self.policy.h_init
         V = self.session.run(self.policy.V, feed_dict=train_dict)
 

@@ -14,7 +14,7 @@ def main():
     # TODO same parameters as in RL2 paper
     # TODO plot trajectories for inspection
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_eps', type=int, default=int(4e3), help='training episodes')
+    parser.add_argument('--train_eps', type=int, default=int(10e3), help='training episodes')
     parser.add_argument('--test_eps', type=int, default=300, help='test episodes')
     parser.add_argument('--seed', type=int, default=1, help='experiment seed')
 
@@ -137,7 +137,6 @@ def main():
             ax[1].imshow(np.transpose(Vleft))
             plt.savefig(Vdir + 'episode_' + str(ep))
             plt.close()
-
 
 
     # evaluation
