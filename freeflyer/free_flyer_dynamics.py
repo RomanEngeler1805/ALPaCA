@@ -120,7 +120,7 @@ class FreeFlyerDynamics:
     }
 
     def __init__(self, randomize_params=False,
-                 rand_init=True,
+                 rand_init=False,
                  discrete_actions=True,
                  configuration='solar'):
         # todo make take argument on single agent vs manipulation
@@ -128,7 +128,7 @@ class FreeFlyerDynamics:
 
         self.discrete_actions = discrete_actions
 
-        self.s_dim = 6
+        self.s_dim = 12
         self.a_dim = 3
 
         self.randomize_params = randomize_params
@@ -187,6 +187,7 @@ class FreeFlyerDynamics:
         self.offset_distance = self.rs + self.ro + self.Ls + self.Lo
         self.start_state = np.zeros(self.s_dim)
         self.start_state[0] = -5.
+        self.start_state[6] = self.start_state[0] + self.offset_distance
 
         # state
         self.state = self.start_state
@@ -197,9 +198,21 @@ class FreeFlyerDynamics:
                    self.angle_limit,
                    self.v_limit,
                    self.v_limit,
+                   self.angle_deriv_limit,
+                   self.x_upper,
+                   self.y_upper,
+                   self.angle_limit,
+                   self.v_limit,
+                   self.v_limit,
                    self.angle_deriv_limit]
 
         low_ob = [self.x_lower,
+                  self.y_lower,
+                  -self.angle_limit,
+                  -self.v_limit,
+                  -self.v_limit,
+                  -self.angle_deriv_limit,
+                  self.x_lower,
                   self.y_lower,
                   -self.angle_limit,
                   -self.v_limit,
@@ -288,7 +301,7 @@ class FreeFlyerDynamics:
             # self.state = self.start_state.copy()
             self.reset_state()
 
-        self.f_upper = 1.+4.*np.random.rand()
+        self.f_upper = 5. #1.+4.*np.random.rand()
 
         return self.observation(self.state)
 
@@ -300,6 +313,14 @@ class FreeFlyerDynamics:
             self.state[3] = np.random.uniform(-0.5, 0.5)
             self.state[4] = np.random.uniform(-0.5, 0.5)
             self.state[5] = 0.
+
+            self.state[6] = self.state[0]+ np.cos(self.state[2]) * self.offset_distance
+            self.state[7] = self.state[1]+ np.sin(self.state[2]) * self.offset_distance
+            self.state[8] = self.state[2]
+            self.state[9] = self.state[3]- np.sin(self.state[2]) * self.state[5] * self.offset_distance
+            self.state[10] = self.state[4]+ np.cos(self.state[2]) * self.state[5] * self.offset_distance
+            self.state[11] = self.state[5]
+
         else:
             self.state = self.start_state.copy()
 
@@ -325,6 +346,13 @@ class FreeFlyerDynamics:
         z[3] = np.random.uniform(-0.5, 0.5)
         z[4] = np.random.uniform(-0.5, 0.5)
         z[5] = np.random.uniform(-0.1, 0.1)
+
+        z[6] = z[0] + np.cos(z[2]) * self.offset_distance
+        z[7] = z[1] + np.sin(z[2]) * self.offset_distance
+        z[8] = z[2]
+        z[9] = z[3] + np.sin(z[2]) * z[5] * self.offset_distance
+        z[10] = z[4] + np.cos(z[2]) * z[5] * self.offset_distance
+        z[11] = z[5]
 
         return z
 
@@ -412,14 +440,19 @@ class FreeFlyerDynamics:
         return f_hat_x, f_hat_y, m_hat
 
     def x_dot(self, z, u):
-        xs, ys, ths, vxs, vys, vths = z
+        xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = z
         f1, f2, f3, f4, m = u
-        #f_hat_x, f_hat_y, mhat = self.get_impingement_forces(f1, f4, z)
+        f_hat_x, f_hat_y, mhat = self.get_impingement_forces(f1, f4, z)
 
         # velocity terms
         xs_d = vxs
         ys_d = vys
         ths_d = vths
+
+        xo_d = vxo
+        yo_d = vyo
+
+        tho_d = vtho
 
         # acceleration terms
 
@@ -434,14 +467,69 @@ class FreeFlyerDynamics:
         vx_conn_s = vxs - np.sin(ths) * (self.rs + self.Ls) * (vths)
         vy_conn_s = vys + np.cos(ths) * (self.rs + self.Ls) * (vths)
 
+        x_conn_o = xo + np.cos(tho) * (-1) * (self.ro + self.Lo)
+        y_conn_o = yo + np.sin(tho) * (-1) * (self.ro + self.Lo)
+
+        vx_conn_o = vxo - np.sin(tho) * (-1) * (self.ro + self.Lo) * (vtho)
+        vy_conn_o = vyo + np.cos(tho) * (-1) * (self.ro + self.Lo) * (vtho)
+
+        x_diff = x_conn_s - x_conn_o
+        y_diff = y_conn_s - y_conn_o
+
+        vx_diff = vx_conn_s - vx_conn_o
+
+        vy_diff = vy_conn_s - vy_conn_o
+
+        # map displacement and vel diff to local frame of spacecraft for spring calcs
+        x_diff_localref = np.cos(ths) * x_diff + np.sin(ths) * y_diff
+        y_diff_localref = - np.sin(ths) * x_diff + np.cos(ths) * y_diff
+
+        vx_diff_localref = np.cos(ths) * vx_diff + np.sin(ths) * vy_diff
+        vy_diff_localref = - np.sin(ths) * vx_diff + np.cos(ths) * vy_diff
+
+        # compute forces in local frame, then map back
+        # spring force applied to spacecraft in spacecraft frame
+        fkx_localref = -self.kx * x_diff_localref
+        fky_localref = -self.ky * y_diff_localref
+
+        # rotate back to global ref frame
+        # TODO move these mappings to a function with forward/backward args
+        fkx = np.cos(ths) * fkx_localref - np.sin(ths) * fky_localref
+        fky = np.sin(ths) * fkx_localref + np.cos(ths) * fky_localref
+
+        mk = - self.kth * norm_angle(ths - tho)  # torsional spring
+
+        # damping
+        fdx_localref = -self.dx * vx_diff_localref
+        fdy_localref = -self.dy * vy_diff_localref
+
+        # rotate back to global ref frame
+        fdx = np.cos(ths) * fdx_localref - np.sin(ths) * fdy_localref
+        fdy = np.sin(ths) * fdx_localref + np.cos(ths) * fdy_localref
+
+        md = - self.dth * (vths - vtho)  # torsional damping
+
+        # spring torque on spacecraft
+        ms = (fdy_localref + fky_localref) * (self.Ls + self.rs)
+
+        # spring torque on object
+
+        mo = (self.Lo + self.ro) * (np.cos(tho) * (fky + fdy) - np.sin(tho) * (fkx + fdx))
+
         sr2inv = self.sr2inv
 
         # should use standardized rotation function for this transform
-        vxs_d = sr2inv * (np.cos(ths) * (f2 + f3 - f1 - f4) - np.sin(ths) * (f3 + f4 - f1 - f2))# + fkx + fdx
-        vys_d = sr2inv * (np.sin(ths) * (f2 + f3 - f1 - f4) + np.cos(ths) * (f3 + f4 - f1 - f2))# + fky + fdy
-        vths_d = m# + ms + mk + md
+        vxs_d = sr2inv * (np.cos(ths) * (f2 + f3 - f1 - f4) - np.sin(ths) * (f3 + f4 - f1 - f2)) + fkx + fdx
+        vys_d = sr2inv * (np.sin(ths) * (f2 + f3 - f1 - f4) + np.cos(ths) * (f3 + f4 - f1 - f2)) + fky + fdy
+        vths_d = m + ms + mk + md
 
-        return [xs_d, ys_d, ths_d, vxs_d, vys_d, vths_d]
+        vxo_d = f_hat_x - fkx - fdx
+        vyo_d = f_hat_y - fky - fdy
+
+        vtho_d = mhat + mo - mk - md
+
+        return [xs_d, ys_d, ths_d, vxs_d, vys_d, vths_d,
+                xo_d, yo_d, tho_d, vxo_d, vyo_d, vtho_d]
 
     def transition(self, x, u):
 
@@ -542,7 +630,6 @@ class FreeFlyerDynamics:
             base.add_attr(self.basetrans)
             self.viewer.add_geom(base)
 
-            '''
             # Draw link 1
             xs = np.linspace(0, scale * self.Ls, 100)
             ys = np.zeros(xs.shape)
@@ -593,10 +680,20 @@ class FreeFlyerDynamics:
             self.p2trans = rendering.Transform()
             p2.add_attr(self.p2trans)
             self.viewer.add_geom(p2)
-            '''
 
         # Calculate poses for geometries
-        xs, ys, ths, vxs, vys, vths = self.state
+        xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = self.state
+
+        x_conn_s = xs + np.cos(ths) * self.rs
+        y_conn_s = ys + np.sin(ths) * self.rs
+        x_conn_o = xo - np.cos(tho) * (self.ro + self.Lo)
+        y_conn_o = yo - np.sin(tho) * (self.ro + self.Lo)
+
+        xp1 = xo - np.cos(tho + self.panel1_angle) * (self.ro + self.panel1_len)
+        yp1 = yo - np.sin(tho + self.panel1_angle) * (self.ro + self.panel1_len)
+        xp2 = xo - np.cos(tho + self.panel2_angle) * (self.ro + self.panel2_len)
+
+        yp2 = yo - np.sin(tho + self.panel2_angle) * (self.ro + self.panel2_len)
 
         # Update poses for geometries
         self.basetrans.set_translation(
@@ -604,7 +701,6 @@ class FreeFlyerDynamics:
             screen_height / 2 + scale * ys)
         self.basetrans.set_rotation(ths)
 
-        '''
         self.l1trans.set_translation(
             screen_width / 2 + scale * x_conn_s,
             screen_height / 2 + scale * y_conn_s)
@@ -629,7 +725,6 @@ class FreeFlyerDynamics:
             screen_width / 2 + scale * xp2,
             screen_height / 2 + scale * yp2)
         self.p2trans.set_rotation(tho + self.panel2_angle)
-        '''
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 

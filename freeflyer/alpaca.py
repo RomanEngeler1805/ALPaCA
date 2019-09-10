@@ -19,7 +19,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.17)
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 9, "Dimensionality of action space")  # only x-y currently
-tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
+tf.flags.DEFINE_integer("state_space", 12, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
 tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
@@ -193,7 +193,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             tempbuffer.reset()
 
             state = env.reset()
-            state = state[:6]
+            #state = state[:6]
 
             # sample w from prior
             sess.run([QNet.sample_prior])
@@ -208,16 +208,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 action = eGreedyAction(Qval, eps)
 
                 next_state, reward, done = env.step(action_env(action))
-                next_state = next_state
+                #next_state = next_state[:6]
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
-
-                '''
-                if episode % 50 == 0 and n == 0:
-                    env.render()
-                    print('(' + str(state[:3]) + ', ' + str(next_state[:3]) + ', ' + str(env.goal_state[:3]) + ', ' + str(reward)+ ')')
-                '''
 
                 # store experience in memory
                 tempbuffer.add(new_experience)
@@ -441,7 +435,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             Vmesh = np.zeros([100, 100])
             for ii,xx in enumerate(np.linspace(-5., 2., 100)):
                 for jj,yy in enumerate(np.linspace(-2., 2., 100)):
-                    st = np.array([xx, yy, 0, 0, 0, 0])
+                    st = np.array([xx, yy, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
                     Qst = sess.run(QNet.Qmean, feed_dict={QNet.state: st.reshape(-1,FLAGS.state_space)})
 
                     Vmesh[ii, jj] = np.max(Qst)
