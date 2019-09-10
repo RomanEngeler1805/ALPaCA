@@ -19,17 +19,22 @@ class LSTMPolicy:
 
 		with tf.variable_scope(self.scope):
 			# initialize lstm cell
-			gru = tf.contrib.rnn.GRUCell(self.hidden_dim, activation=self.activation_fn)
-			self.h_init = np.zeros((1, gru.state_size), np.float32)
+			lstm = tf.contrib.rnn.LSTMCell(self.hidden_dim, state_is_tuple=True, activation=self.activation_fn)
+			self.c_init = np.zeros((1, lstm.state_size.c), np.float32)
+			self.h_init = np.zeros((1, lstm.state_size.h), np.float32)
 
-			self.h_in = tf.placeholder(tf.float32, [1, gru.state_size])
+			self.c_in = tf.placeholder(tf.float32, [1, lstm.state_size.c])
+			self.h_in = tf.placeholder(tf.float32, [1, lstm.state_size.h])
 
-			lstm_out, lstm_state = self.gru_unit(input=inputs,
-											hold=self.h_in,
-											activation=self.activation_fn)
-
+			lstm_out, lstm_state = tf.nn.dynamic_rnn(lstm,
+				inputs=tf.expand_dims(inputs, [0]),
+				initial_state= tf.contrib.rnn.LSTMStateTuple(self.c_in, self.h_in),
+				sequence_length=tf.shape(inputs)[:1],
+				time_major=False
+			)
 			# extract lstm internal state
-			lstm_h = lstm_state
+			lstm_c, lstm_h = lstm_state
+			self.c_out = lstm_c[:1, :]
 			self.h_out = lstm_h[:1, :]
 			lstm_out_flat = tf.reshape(lstm_out, [-1, self.hidden_dim])
 
@@ -39,35 +44,8 @@ class LSTMPolicy:
 			self._variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.scope)
 
 		# copy state
+		self.prev_c = self.c_init.copy()
 		self.prev_h = self.h_init.copy()
-
-
-    def gru_unit(self, input, hold, activation=tf.nn.relu):
-		Wz = tf.get_variable(name='Wz', shape=[self.hidden_dim + 11, self.hidden_dim],
-							 initializer=tf.contrib.layers.xavier_initializer())
-		Wr = tf.get_variable(name='Wr', shape=[self.hidden_dim + 11, self.hidden_dim],
-							 initializer=tf.contrib.layers.xavier_initializer())
-		W = tf.get_variable(name='W', shape=[self.hidden_dim + 11, self.hidden_dim],
-							initializer=tf.contrib.layers.xavier_initializer())
-
-		xin = tf.unstack(input, axis=0)
-		output = []
-
-		for x in xin:
-			z = activation(
-				tf.matmul(tf.concat([hold, x], axis=1), Wz))  # [1, hidden+ input] x [hidden+ input, hidden] = [1, hidden]
-			r = activation(
-				tf.matmul(tf.concat([hold, x], axis=1), Wr))  # [1, hidden+ input] x [hidden+ input, hidden] = [1, hidden]
-
-			hh = activation(tf.matmul(tf.concat([r * hold, x], axis=0), W))  # [hidden] ?
-			h = (1 - z) * hold + z * hh  # [hidden]
-			hold = tf.copy(h)
-
-			output.append(h)
-
-		output = tf.stack(output)
-
-		return output, output
 
     @property
     def recurrent(self):
@@ -86,6 +64,7 @@ class LSTMPolicy:
         return self._variables
 
     def reset(self):
+        self.prev_c = self.c_init.copy()
         self.prev_h = self.h_init.copy()
 
     def save(self, session, filename):

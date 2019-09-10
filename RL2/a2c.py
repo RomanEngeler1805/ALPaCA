@@ -75,10 +75,11 @@ class A2C:
         if not self.policy.recurrent:
             actions, values = self.session.run([self.act, self.policy.V], feed_dict={self.X: X})
         else:
-            print(X.shape)
-            actions, values, h_out = self.session.run([self.act, self.policy.V, self.policy.h_out],
+            actions, values, c_out, h_out = self.session.run([self.act, self.policy.V, self.policy.c_out, self.policy.h_out],
                 feed_dict={self.X: X, self.Aold: A, self.Rold: R,
+                self.policy.c_in: self.policy.prev_c,
                 self.policy.h_in: self.policy.prev_h})
+            self.policy.prev_c = c_out # keep track of RNN internal hidden state
             self.policy.prev_h = h_out
         return actions, values
 
@@ -99,6 +100,7 @@ class A2C:
         train_dict = {self.X: ep_X[1:], self.ADV: ep_adv[1:], self.A: ep_A[1:], self.R: ep_R[1:],
                       self.Aold: ep_A[:-1], self.Rold: ep_R[:-1]}
         if self.policy.recurrent:
+            train_dict[self.policy.c_in] = self.policy.c_init
             train_dict[self.policy.h_in] = self.policy.h_init
         pLoss, vLoss, Vfcn, ent, _ = self.session.run([self.pg_loss, self.vf_loss, self.policy.V, self.entropy, self.train_op],
 			feed_dict=train_dict)
@@ -122,6 +124,7 @@ class A2C:
 
     def observe_V(self, X, A, R):
         train_dict = {self.X: X, self.Aold: A, self.Rold: R}
+        train_dict[self.policy.c_in] = self.policy.c_init
         train_dict[self.policy.h_in] = self.policy.h_init
         V = self.session.run(self.policy.V, feed_dict=train_dict)
 

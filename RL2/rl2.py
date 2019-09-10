@@ -14,7 +14,7 @@ def main():
     # TODO same parameters as in RL2 paper
     # TODO plot trajectories for inspection
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_eps', type=int, default=int(10e3), help='training episodes')
+    parser.add_argument('--train_eps', type=int, default=int(4e3), help='training episodes')
     parser.add_argument('--test_eps', type=int, default=300, help='test episodes')
     parser.add_argument('--seed', type=int, default=1, help='experiment seed')
 
@@ -168,8 +168,8 @@ def main():
             step+= 1
 
         test_rewards.append(track_R)
-    print('Mean Test Cumulative Regret: {}'.format(np.mean(test_regrets)))
-    print('Mean Test Reward: {}'.format(np.mean(test_rewards)))
+    print('Mean Test Reward: {}'.format(np.mean(test_rewards[:])))
+    print(test_rewards)
 
 if __name__=='__main__':
     main()
