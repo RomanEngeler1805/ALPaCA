@@ -13,7 +13,7 @@ import pandas as pd
 import sys
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.20)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.16)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
@@ -33,7 +33,7 @@ tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N ste
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.1, "Initial split ratio for conditioning")
 tf.flags.DEFINE_float("split_ratio_max", 512./562, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
@@ -45,10 +45,10 @@ tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 562, "Length of episodes")
 tf.flags.DEFINE_integer("num_datasets", 64, "Length of episodes")
 
-tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
-tf.flags.DEFINE_integer("update_freq_target", 20, "Update frequency of target network")
+tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
+tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
-tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 8, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 400, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
@@ -369,7 +369,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         lossBuffer *= 0.
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-        if episode < 3:
+        if episode < 4:
             batch_size *= 2
 
         # learning rate schedule

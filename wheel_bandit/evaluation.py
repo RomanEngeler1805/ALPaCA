@@ -6,6 +6,7 @@ from synthetic_data_sampler import sample_wheel_bandit_data
 from evaluation_tf import Qeval
 import sys
 import time
+import os
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
@@ -38,6 +39,8 @@ tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
 
+tf.flags.DEFINE_string('model_name', '14-22-31_08-19', 'Name of the model for evaluation')
+
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
 
@@ -45,8 +48,11 @@ from wheel_bandit_environment import wheel_bandit_environment
 env = wheel_bandit_environment(FLAGS.action_space, FLAGS.random_seed)
 
 # load tf model
-model_name = '14-22-31_08-19'
-model_dir = './model/'+ model_name+ '/'
+load_dir = './model/'+ FLAGS.model_name+ '/'
+save_dir = './eval/'
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
+
 
 #
 # sample dataset
@@ -70,8 +76,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     Qeval = Qeval(FLAGS)
 
     saver = tf.train.Saver(max_to_keep=4)
-    saver.restore(sess, tf.train.latest_checkpoint(model_dir))
-    print('Successfully restored model from '+ str(tf.train.latest_checkpoint(model_dir)))
+    saver.restore(sess, tf.train.latest_checkpoint(load_dir))
+    print('Successfully restored model from '+ str(tf.train.latest_checkpoint(load_dir)))
 
     # Loop over deltas (exploration parameter)
     for delta in [0.5, 0.7, 0.9, 0.95, 0.99]:
@@ -144,7 +150,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 rew_rand[shuffle] += np.sum(dataset[data_idx[i:i+batch_size], 2 + np.random.randint(0, 5, size=np.min([batch_size, num_contexts-i]))])  # first two entries are state
 
         # print reward
-        file = open(model_name, 'a')
+        file = open(save_dir+ FLAGS.model_name, 'a')
         file.write('===================================\n')
         file.write('=========== delta = '+ str(delta) +' ==========\n')
         file.write('Reward LSTD: \n')

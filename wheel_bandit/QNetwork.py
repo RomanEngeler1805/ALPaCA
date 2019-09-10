@@ -120,7 +120,7 @@ class QNetwork():
         # output layer (Bayesian) =========================================================
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
-        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim), trainable=False)  # cholesky
+        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
         L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
         self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
@@ -150,7 +150,7 @@ class QNetwork():
 
         self.sample_prior = self._sample_prior()
         with tf.control_dependencies([self.w_assign, self.L_assign]):
-            self.sample_post = self._sample_posterior(wt_bar, Lt_inv)
+            self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
         self.reset_post = self._reset_posterior()
 
         # loss function ==================================================================
@@ -233,11 +233,11 @@ class QNetwork():
 
     def _sample_MN(self, mu, cov):
         ''' sample from multi-variate normal '''
-        #A = tf.linalg.cholesky(cov)
-        V, U = tf.linalg.eigh(cov)
+        A = tf.linalg.cholesky(cov)
+        #V, U = tf.linalg.eigh(cov)
         z = tf.random_normal(shape=[self.latent_dim,1])
-        #x = mu + tf.matmul(A, z)
-        x = mu+ tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
+        x = mu + tf.matmul(A, z)
+        #x = mu+ tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
         return x
 
     def _update_posterior(self, phi_hat, reward):

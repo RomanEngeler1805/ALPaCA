@@ -2,23 +2,19 @@
 echo "==================="
 rs1=1234
 rs2=2345
-python alpaca.py --non_linearity='leaky_relu' --random_seed=$rs1 &
+python alpaca.py --update_freq_target=1 --tau=0.001 --random_seed=$rs1 &
 sleep 1m
-python alpaca.py --non_linearity='leaky_relu' --random_seed=$rs2
+python alpaca.py --update_freq_target=1 --tau=0.001 --random_seed=$rs2
 wait
-python alpaca.py --update_freq_target=1 --tau=0.1 --random_seed=$rs1 &
+python alpaca.py --update_freq_target=1 --tau=0.01 --noise_precision=0.05 --random_seed=$rs1 &
 sleep 1m
-python alpaca.py --update_freq_target=1 --tau=0.1 --random_seed=$rs2
+python alpaca.py --update_freq_target=1 --tau=0.01 --noise_precision=0.05 --random_seed=$rs2
 wait
-python alpaca.py --update_freq_target=1 --tau=0.01 --random_seed=$rs1 &
+python alpaca.py --update_freq_target=1 --tau=0.01 --noise_precision=0.1 --random_seed=$rs1 &
 sleep 1m
-python alpaca.py --update_freq_target=1 --tau=0.01 --random_seed=$rs2
+python alpaca.py --update_freq_target=1 --tau=0.01 --noise_precision=0.1 --random_seed=$rs2
 wait
-python alpaca.py --L_episode=280 --num_datasets=128 --random_seed=$rs1 &
+python alpaca.py --update_freq_target=1 --tau=0.01 --non_linearity='leaky_relu' --random_seed=$rs1 &
 sleep 1m
-python alpaca.py --L_episode=280 --num_datasets=128 --random_seed=$rs2
-wait
-python alpaca.py --split_ratio_max=0.5 --random_seed=$rs1 &
-sleep 1m
-python alpaca.py --split_ratio_max=0.5 --random_seed=$rs2
+python alpaca.py --update_freq_target=1 --tau=0.01 --non_linearity='leaky_relu' --random_seed=$rs2
 wait
