@@ -6,4 +6,6 @@
 *.pyc
 */.ipynb_checkpoints
 */run_simulations
+*/run_simulations2
+*/run_simulations3
 */.idea
