@@ -136,13 +136,13 @@ class FreeFlyerDynamics:
 
         # spacecraft params:
         self.ms = 6700.  # SSL-1300 bus
-        self.Js = 1 / 12 * 6700 * (5 ^ 2 + 5 ^ 2)  # cube
+        self.Js = 1. / 12 * 6700 * (5 ^ 2 + 5 ^ 2)  # cube
         self.rs = 2.5
         self.Ls = 1.5
 
         # object params:
         self.mo_nom = 1973.  # Landsat-7 bus
-        self.Jo_nom = 1 / 12 * self.mo_nom * (4 ^ 2 + 4 ^ 2)  # cube
+        self.Jo_nom = 1. / 12 * self.mo_nom * (4 ^ 2 + 4 ^ 2)  # cube
         self.ro = 1.5
         self.Lo = 1.5
 
@@ -188,6 +188,9 @@ class FreeFlyerDynamics:
         self.start_state = np.zeros(self.s_dim)
         self.start_state[0] = -5.
         self.start_state[6] = self.start_state[0] + self.offset_distance
+
+        # state
+        self.state = self.start_state
 
         # TODO define spaces
         high_ob = [self.x_upper,
@@ -295,14 +298,29 @@ class FreeFlyerDynamics:
 
             self.state = self.get_ob_sample()
         else:
-            self.state = self.start_state.copy()
+            # self.state = self.start_state.copy()
+            self.reset_state()
+
+        self.f_upper = 5. #1.+4.*np.random.rand()
 
         return self.observation(self.state)
 
     def reset_state(self):
         if self.rand_init:
-            # todo
-            raise NotImplementedError
+            self.state[0] = np.random.uniform(-10, 10)
+            self.state[1] = np.random.uniform(-10, 10)
+            self.state[2] = 0.
+            self.state[3] = np.random.uniform(-0.5, 0.5)
+            self.state[4] = np.random.uniform(-0.5, 0.5)
+            self.state[5] = 0.
+
+            self.state[6] = self.state[0]+ np.cos(self.state[2]) * self.offset_distance
+            self.state[7] = self.state[1]+ np.sin(self.state[2]) * self.offset_distance
+            self.state[8] = self.state[2]
+            self.state[9] = self.state[3]- np.sin(self.state[2]) * self.state[5] * self.offset_distance
+            self.state[10] = self.state[4]+ np.cos(self.state[2]) * self.state[5] * self.offset_distance
+            self.state[11] = self.state[5]
+
         else:
             self.state = self.start_state.copy()
 
@@ -329,13 +347,12 @@ class FreeFlyerDynamics:
         z[4] = np.random.uniform(-0.5, 0.5)
         z[5] = np.random.uniform(-0.1, 0.1)
 
-        noise_ampl = 0.2
-        z[6] = z[0] + np.cos(z[2]) * self.offset_distance + np.random.randn() * noise_ampl  # xo
-        z[7] = z[1] + np.sin(z[2]) * self.offset_distance + np.random.randn() * noise_ampl  # yo
-        z[8] = z[2] + np.random.randn() * noise_ampl  # tho
-        z[9] = z[3] - np.sin(z[2]) * z[5] * self.offset_distance + np.random.randn() * noise_ampl  # vxo
-        z[10] = z[4] + np.cos(z[2]) * z[5] * self.offset_distance + np.random.randn() * noise_ampl  # vyo
-        z[11] = z[5] + np.random.randn() * noise_ampl  # vtho
+        z[6] = z[0] + np.cos(z[2]) * self.offset_distance
+        z[7] = z[1] + np.sin(z[2]) * self.offset_distance
+        z[8] = z[2]
+        z[9] = z[3] + np.sin(z[2]) * z[5] * self.offset_distance
+        z[10] = z[4] + np.cos(z[2]) * z[5] * self.offset_distance
+        z[11] = z[5]
 
         return z
 
@@ -434,6 +451,7 @@ class FreeFlyerDynamics:
 
         xo_d = vxo
         yo_d = vyo
+
         tho_d = vtho
 
         # acceleration terms
@@ -459,6 +477,7 @@ class FreeFlyerDynamics:
         y_diff = y_conn_s - y_conn_o
 
         vx_diff = vx_conn_s - vx_conn_o
+
         vy_diff = vy_conn_s - vy_conn_o
 
         # map displacement and vel diff to local frame of spacecraft for spring calcs
@@ -494,17 +513,19 @@ class FreeFlyerDynamics:
         ms = (fdy_localref + fky_localref) * (self.Ls + self.rs)
 
         # spring torque on object
+
         mo = (self.Lo + self.ro) * (np.cos(tho) * (fky + fdy) - np.sin(tho) * (fkx + fdx))
 
         sr2inv = self.sr2inv
 
         # should use standardized rotation function for this transform
-        vxs_d = sr2inv * (np.cos(ths) * (f2 + f3 - f1 - f4) - np.sin(ths) * (f3 + f4 - f1 - f2))# + fkx + fdx
-        vys_d = sr2inv * (np.sin(ths) * (f2 + f3 - f1 - f4) + np.cos(ths) * (f3 + f4 - f1 - f2))# + fky + fdy
-        vths_d = m# + ms + mk + md
+        vxs_d = sr2inv * (np.cos(ths) * (f2 + f3 - f1 - f4) - np.sin(ths) * (f3 + f4 - f1 - f2)) + fkx + fdx
+        vys_d = sr2inv * (np.sin(ths) * (f2 + f3 - f1 - f4) + np.cos(ths) * (f3 + f4 - f1 - f2)) + fky + fdy
+        vths_d = m + ms + mk + md
 
         vxo_d = f_hat_x - fkx - fdx
         vyo_d = f_hat_y - fky - fdy
+
         vtho_d = mhat + mo - mk - md
 
         return [xs_d, ys_d, ths_d, vxs_d, vys_d, vths_d,
@@ -540,7 +561,7 @@ class FreeFlyerDynamics:
         action = [f1, f2, f3, f4, clipped_moment]
 
         if sum(np.isnan(action)) > 0:
-            raise ValueError("Passed in nan to step! Action: " + str(action));
+            raise ValueError("Passed in nan to step! Action: " + str(action))
 
         old_state = x.copy()  # np.array(self.state)
 
@@ -565,19 +586,22 @@ class FreeFlyerDynamics:
 
         # add done and reward to observation
 
-        return np.array([self.observation(self.state), self.reward(), self.done()])
+        return np.array([self.observation(self.state), self.reward(action), self.done()])
 
     def done(self):
         #if np.linalg.norm(self.state[:2] - self.goal_state[:2]) < 1e-1:
         #    return 1
 
-        if any(self.state > self.high_state) or any(self.state < self.low_state):
+        if any(self.state[:3] > self.high_state[:3]) or any(self.state[:3] < self.low_state[:3]):
             return 1
 
         return 0
 
-    def reward(self):
-        rew = 1. / (np.linalg.norm(self.state[:2] - self.goal_state[:2])+ 1.)
+    def reward(self, action):
+        if any(self.state[:3] > self.high_state[:3]) or any(self.state[:3] < self.low_state[:3]):
+            return 0.
+
+        rew = 10. / (np.linalg.norm(self.state[:3] - self.goal_state[:3])+ 1.)- 0.01* np.linalg.norm(action)
         # rew = -np.linalg.norm(self.state[:2] - self.goal_state[:2])
         return rew
 
@@ -606,7 +630,6 @@ class FreeFlyerDynamics:
             base.add_attr(self.basetrans)
             self.viewer.add_geom(base)
 
-            '''
             # Draw link 1
             xs = np.linspace(0, scale * self.Ls, 100)
             ys = np.zeros(xs.shape)
@@ -657,12 +680,10 @@ class FreeFlyerDynamics:
             self.p2trans = rendering.Transform()
             p2.add_attr(self.p2trans)
             self.viewer.add_geom(p2)
-            '''
 
         # Calculate poses for geometries
         xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = self.state
 
-        # NOTE: x_conn_s&y_conn_s definitions are NOT same as defined above
         x_conn_s = xs + np.cos(ths) * self.rs
         y_conn_s = ys + np.sin(ths) * self.rs
         x_conn_o = xo - np.cos(tho) * (self.ro + self.Lo)
@@ -671,6 +692,7 @@ class FreeFlyerDynamics:
         xp1 = xo - np.cos(tho + self.panel1_angle) * (self.ro + self.panel1_len)
         yp1 = yo - np.sin(tho + self.panel1_angle) * (self.ro + self.panel1_len)
         xp2 = xo - np.cos(tho + self.panel2_angle) * (self.ro + self.panel2_len)
+
         yp2 = yo - np.sin(tho + self.panel2_angle) * (self.ro + self.panel2_len)
 
         # Update poses for geometries
@@ -679,7 +701,6 @@ class FreeFlyerDynamics:
             screen_height / 2 + scale * ys)
         self.basetrans.set_rotation(ths)
 
-        '''
         self.l1trans.set_translation(
             screen_width / 2 + scale * x_conn_s,
             screen_height / 2 + scale * y_conn_s)
@@ -704,7 +725,6 @@ class FreeFlyerDynamics:
             screen_width / 2 + scale * xp2,
             screen_height / 2 + scale * yp2)
         self.p2trans.set_rotation(tho + self.panel2_angle)
-        '''
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 

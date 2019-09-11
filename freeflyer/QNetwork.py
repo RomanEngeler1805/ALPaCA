@@ -132,6 +132,7 @@ class QNetwork():
         self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
         self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
+
         self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
 
         # posterior (analytical update) --------------------------------------------------

@@ -18,36 +18,36 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.17)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")  # only x-y currently
-tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta]s, [x,y,theta]t
+tf.flags.DEFINE_integer("action_space", 9, "Dimensionality of action space")  # only x-y currently
+tf.flags.DEFINE_integer("state_space", 12, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
 tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 
-tf.flags.DEFINE_float("learning_rate", 2e-3, "Initial learning rate")
+tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 10., "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 1.0, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 1000, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_float("split_ratio", 0.03, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 3, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 5000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
-tf.flags.DEFINE_integer("replay_memory_size", 200, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 100, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.001, "Regularization parameter")
@@ -66,7 +66,7 @@ from QNetwork import QNetwork
 
 sys.path.insert(0, './..')
 from replay_buffer import replay_buffer
-from prioritized_memory import Memory
+#from prioritized_memory import Memory
 
 
 def eGreedyAction(x, epsilon=0.):
@@ -192,18 +192,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # initialize buffer
             tempbuffer.reset()
 
-            '''
-            # reset environment
             state = env.reset()
-            goal_state = np.zeros(12)
-            goal_state[0] = 0
-            goal_state[1] = -5
-            goal_state[2] = -0.5
-            env.set_goal_state(goal_state)
-            '''
-
-            state = env.reset()
-            state = state[:6]
+            #state = state[:6]
 
             # sample w from prior
             sess.run([QNet.sample_prior])
@@ -213,50 +203,15 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             while step < FLAGS.L_episode:
 
-                if step% 1 == 0:
-                    # take a step
-                    Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
-                    action = eGreedyAction(Qval, eps)
+                # take a step
+                Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
+                action = eGreedyAction(Qval, eps)
 
-                    if action == 1:
-                        aevn = np.array([-1,1,0])
-                    elif action == 2:
-                        aevn = -np.array([-1,1,0])
-                    else:
-                        aevn = np.array([0, 0, 0])
+                next_state, reward, done = env.step(action_env(action))
+                #next_state = next_state[:6]
 
-                    next_state, reward, done = env.step(aevn)
-                    next_state = next_state[:6]
-
-                    # store experience in memory
-                    new_experience = [state, action, reward, next_state, done]
-                else:
-                    # controller
-                    err = env.goal_state[:6]- state
-                    kp = np.array([[0.001, 0, 0, 5e-2, 0, 0],
-                                   [0, 0.001, 0, 0, 5e-2, 0],
-                                   [0, 0, -0.1, 0, 0, -10.]])
-                    u = np.dot(kp, err)
-                    theta = env.state[2]
-
-                    R = np.array([[np.cos(np.pi/4.+ theta), np.sin(np.pi/4.+ theta), 0.],
-                                  [-np.sin(np.pi/4.+ theta), np.cos(np.pi/4.+ theta), 0.],
-                                  [0., 0., 1.]])
-
-                    action = np.sign(-np.dot(R, u))
-                    action = action* (np.abs(action)> 0.1)
-
-                    next_state, reward, done = env.step(action)
-                    next_state = next_state[:6]
-
-                    new_experience = [state, (action[0] + 1) + (action[1] + 1) * 3, reward, next_state, done]
-
-
-                '''
-                if episode % 50 == 0 and n == 0:
-                    env.render()
-                    print('(' + str(state[:3]) + ', ' + str(next_state[:3]) + ', ' + str(env.goal_state[:3]) + ', ' + str(reward)+ ')')
-                '''
+                # store experience in memory
+                new_experience = [state, action, reward, next_state, done]
 
                 # store experience in memory
                 tempbuffer.add(new_experience)
@@ -304,8 +259,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             fullbuffer.add(tempbuffer.buffer)
 
             if episode%50 == 0 and n == 0:
-                state_sample = np.zeros((FLAGS.L_episode, FLAGS.state_space))
-                action_sample = np.zeros((FLAGS.L_episode,))
+
+                L_episode = tempbuffer.num_experiences
+                state_sample = np.zeros((L_episode, FLAGS.state_space))
+                action_sample = np.zeros((L_episode,))
                 # fill arrays
                 for k, (s0, a, r, s1, d) in enumerate(tempbuffer.buffer):
                     state_sample[k] = s0
@@ -315,6 +272,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 ax[0].plot(state_sample[:,0], state_sample[:,1], 'b', marker='o', markersize=12)
                 ax[0].plot(state_sample[0, 0], state_sample[0, 1], 'cyan', marker='o', markersize=12)
                 ax[0].plot(env.goal_state[0], env.goal_state[1], 'r', marker='o', markersize=12)
+                ax[0].set_xlim([-10., 10.])
+                ax[0].set_ylim([-10., 10.])
                 actionx, actiony, _ = action_env(action_sample)
                 ax[1].plot(actionx)
                 ax[2].plot(actiony)
@@ -474,15 +433,15 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # plot value function
             Vmesh = np.zeros([100, 100])
-            for ii,xx in enumerate(np.linspace(-5., 1., 100)):
+            for ii,xx in enumerate(np.linspace(-5., 2., 100)):
                 for jj,yy in enumerate(np.linspace(-2., 2., 100)):
-                    st = np.array([xx, yy, 0, 0, 0, 0])
+                    st = np.array([xx, yy, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
                     Qst = sess.run(QNet.Qmean, feed_dict={QNet.state: st.reshape(-1,FLAGS.state_space)})
 
                     Vmesh[ii, jj] = np.max(Qst)
 
             plt.figure()
-            plt.imshow(np.transpose(Vmesh), extent=[-5., 1., -2., 2.])
+            plt.imshow(np.transpose(Vmesh), extent=[-10., 10., -10., 10.])
             plt.plot(-1., 0., markersize=20)
             plt.savefig(V_M_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
             plt.close()
