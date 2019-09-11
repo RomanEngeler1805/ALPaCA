@@ -40,14 +40,14 @@ tf.flags.DEFINE_integer("update_freq_post", 1000, "Update frequency of posterior
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 5000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
-tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 200, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 100, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.001, "Regularization parameter")
@@ -265,11 +265,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             fullbuffer.add(tempbuffer.buffer)
 
             if episode%50 == 0 and n == 0:
-                print(eps)
 
                 L_episode = tempbuffer.num_experiences
                 state_sample = np.zeros((L_episode, FLAGS.state_space))
                 action_sample = np.zeros((L_episode,))
+
                 # fill arrays
                 for k, (s0, a, r, s1, d) in enumerate(tempbuffer.buffer):
                     state_sample[k] = s0
@@ -281,6 +281,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 ax[0].plot(env.goal_state[0], env.goal_state[1], 'r', marker='o', markersize=12)
                 ax[0].set_xlim([-10., 10.])
                 ax[0].set_ylim([-10., 10.])
+
                 actionx, actiony, _ = action_env(action_sample)
                 ax[1].plot(actionx)
                 ax[2].plot(actiony)
@@ -440,7 +441,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # plot value function
             Vmesh = np.zeros([100, 100])
-            for ii,xx in enumerate(np.linspace(-5., 2., 100)):
+
+            for ii,xx in enumerate(np.linspace(-5., 1., 100)):
                 for jj,yy in enumerate(np.linspace(-2., 2., 100)):
                     st = np.array([xx, yy, 0, 0, 0, 0])
                     Qst = sess.run(QNet.Qmean, feed_dict={QNet.state: st.reshape(-1,FLAGS.state_space)})
@@ -449,6 +451,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             plt.figure()
             plt.imshow(np.transpose(Vmesh), extent=[-10., 10., -10., 10.])
+
             plt.plot(-1., 0., markersize=20)
             plt.savefig(V_M_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
             plt.close()
