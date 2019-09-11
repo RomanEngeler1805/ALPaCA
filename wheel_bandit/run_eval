@@ -1,0 +1,8 @@
+#!/bin/bash
+python evaluation.py --model_name='08-03-03_09-19'
+python evaluation.py --model_name='08-04-03_09-19'
+python evaluation.py --model_name='10-42-04_09-19'
+python evaluation.py --model_name='10-44-04_09-19'
+python evaluation.py --model_name='14-35-04_09-19'
+python evaluation.py --model_name='17-26-04_09-19'
+python evaluation.py --model_name='18-14-04_09-19'

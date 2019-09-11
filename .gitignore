@@ -2,6 +2,7 @@
 */summaries
 */logger
 */figures
+*/eval
 *.pyc
 */.ipynb_checkpoints
 */run_simulations
