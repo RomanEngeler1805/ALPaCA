@@ -51,7 +51,7 @@ tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target net
 tf.flags.DEFINE_integer("replay_memory_size", 8, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 400, "Store images every N-th episode")
-tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
+tf.flags.DEFINE_float("regularizer", 1.0, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_bool("load_model", False, "Load trained model")
@@ -144,6 +144,13 @@ std_large = 0.01
 
 # training
 deltas_train = np.random.rand(num_datasets)
+
+plt.figure()
+plt.hist(deltas_train)
+plt.xlabel('delta')
+plt.ylabel('count')
+plt.savefig(reward_dir+ 'delta_distribution')
+plt.close()
 
 dataset_train = np.empty([num_datasets, num_contexts, 7])
 opt_wheel_train = np.empty([num_datasets, num_contexts, 2])
@@ -447,7 +454,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         action = eGreedyAction(Qval, eps)
 
                         actions.append(action)
-
                         reward = dataset_eval[de,step, 2+ action]
 
                         # expected model reward
