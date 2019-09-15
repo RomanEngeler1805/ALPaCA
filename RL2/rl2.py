@@ -8,13 +8,14 @@ from a2c import A2C
 from environment import environment
 import matplotlib.pyplot as plt
 import time
+import pandas as pd
 
 def main():
     # TODO change to Flags arguments
     # TODO same parameters as in RL2 paper
     # TODO plot trajectories for inspection
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_eps', type=int, default=int(4e3), help='training episodes')
+    parser.add_argument('--train_eps', type=int, default=int(8e3), help='training episodes')
     parser.add_argument('--test_eps', type=int, default=1000, help='test episodes')
     parser.add_argument('--seed', type=int, default=1, help='experiment seed')
 
@@ -31,9 +32,16 @@ def main():
     if not os.path.exists(Vdir):
         os.makedirs(Vdir)
 
+    reward_dir = 'figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Reward/'
+    if not os.path.exists(reward_dir):
+        os.makedirs(reward_dir)
+
     # environment
     env = environment(9)
     eval_env = environment(9)
+
+    # report mean reward per episode
+    reward_episode = []
 
     # network
     algo = A2C(env=env,
@@ -106,6 +114,9 @@ def main():
         ep_V = np.squeeze(np.asarray(ep_V, dtype=np.float32))
         ep_D = np.asarray(ep_D, dtype=np.float32)
 
+        # append reward
+        reward_episode.append(np.sum(ep_R))
+
         if ep_D[-1] == 0:
             disc_rew = discount_with_dones(ep_R.tolist() + [np.squeeze(last_value)], ep_D.tolist() + [0], args.gamma)[:-1]
         else:
@@ -169,8 +180,10 @@ def main():
 
         test_rewards.append(track_R)
     print('Mean Test Reward: {}'.format(np.mean(test_rewards[:])))
-    print('Mean Test Reward: {}'.format(np.mean(np.array(test_rewards[:]))))
-    print(test_rewards)
+
+    # write reward to file
+    df = pd.DataFrame(reward_episode)
+    df.to_csv(reward_dir + 'reward_per_episode', index=False)
 
 if __name__=='__main__':
     main()
