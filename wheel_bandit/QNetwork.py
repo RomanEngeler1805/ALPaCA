@@ -174,8 +174,9 @@ class QNetwork():
         self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
         self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
         self.loss2 = logdet_Sigma
+        self.loss_reg = tf.losses.get_regularization_loss()
 
-        self.loss = self.loss1+ self.loss2
+        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss_reg
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)

@@ -9,37 +9,62 @@ class environment():
 
         # initialize agent
         self.state = np.zeros([self.size])
-        self.state[0] = 1
+        self.state[(self.size-1)/2] = 1
 
         # termination flag
         self.d = 0
 
         # initialize target
-        #self.target = np.array((self.size-1) * np.random.randint(0, 2))
+        self.target = np.array((self.size-1) * np.random.randint(0, 2))
         #self.target = self.size - 1
-        self.target = (self.size-1) //2 * np.random.randint(1,3)
+
+        self.rew_mag = 1. + np.random.normal()
 
     def _sample_env(self):
         ''' resample delta '''
-        #self.target = np.array((self.size-1) * np.random.randint(0, 2))
+        self.target = np.array((self.size-1) * np.random.randint(0, 2))
         #self.target = self.size- 1
-        self.target = (self.size - 1) // 2 * np.random.randint(1, 3)
+        self.rew_mag = 1.+np.random.normal()
 
     def _sample_state(self):
         self.state = np.zeros([self.size])
-        self.state[0] = 1
-
-        thermo = np.zeros([self.size])
-        thermo[0: np.where(self.state == 1)[0][0]+1] = 1
-        return thermo
+        self.state[(self.size - 1) / 2] = 1
+        return self.state
 
     def reward(self):
-        ''' reward function '''
-        # 1- 1.*np.abs(self.target- np.argmax(self.state))/self.size
-        # (self.size- 1)- np.abs(self.target- np.argmax(self.state))
-        #if self.state[self.target] == 1:
-        #    return 1
-        return 1.- 1.*np.abs(self.target- np.argmax(self.state))/self.size
+        # Sparse Reward
+        if self.state[self.target] == 1:
+            return 1.
+        return 0.
+
+    '''
+    def reward(self):
+        # dense reward
+        
+        return 10.*(self.size- 1- np.abs(self.target- np.argmax(self.state)))/ (self.size- 1)
+    '''
+
+    '''
+    def reward(self):
+        # Bernoulli Reward
+        p = 1.*(self.size- 1- np.abs(self.target- np.argmax(self.state)))/ (self.size- 1)
+        if p > np.random.rand():
+            rew = 1.
+        else:
+            rew = 0.
+
+        
+        return rew
+    '''
+    '''
+    def reward(self):
+        # Gaussian Reward
+        sigma = 0.02
+        mu = 1.-1.*np.abs(self.target- np.argmax(self.state))/ (self.size- 1) # linearly increasing from 0 to 1
+        rew = np.random.normal(mu, sigma)
+
+        return rew
+    '''
 
     def termination(self):
         ''' determine termination of MDP '''
@@ -60,7 +85,7 @@ class environment():
             if action == 1 and pos != 0: # left
                 self.state[pos] = 0
                 self.state[pos- 1] = 1
-            if action == 2 and pos != self.size-1: # right
+            if action == 2 and pos != self.size-1: # down
                 self.state[pos] = 0
                 self.state[pos+ 1] = 1
 
@@ -68,9 +93,6 @@ class environment():
         r = self.reward()
 
         # stack observation
-        thermo = np.zeros([self.size])
-        thermo[0: np.where(self.state == 1)[0][0]+1] = 1
-
-        obs = np.array([thermo, r, d])
+        obs = np.array([self.state, r, d])
 
         return obs

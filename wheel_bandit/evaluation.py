@@ -69,13 +69,14 @@ std_large = 0.01
 delta = 0.9
 
 # Create Session
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.32)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.12)
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     QNet = QNetwork(FLAGS)
     Qeval = Qeval(FLAGS)
 
     saver = tf.train.Saver(max_to_keep=4)
-    saver.restore(sess, tf.train.latest_checkpoint(load_dir))
+    #saver.restore(sess, tf.train.latest_checkpoint(load_dir))
+    saver.restore(sess, load_dir+'model-2800')
     print('Successfully restored model from '+ str(tf.train.latest_checkpoint(load_dir)))
 
     # Loop over deltas (exploration parameter)
@@ -172,7 +173,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         file.write('Regret: \n')
         file.write('{:3.2f}% +- {:2.2f}%\n'.format(100.*(np.sum(opt_wheel[:,0])-np.mean(rew_agent))/
                                         (np.sum(opt_wheel[:,0])-np.mean(rew_rand)),
-                                         100.*np.std(rew_agent)/(np.sum(opt_wheel[:,0])-np.mean(rew_rand))))
+                                         1./np.sqrt(num_datasets)* 100.*np.std(rew_agent)/(np.sum(opt_wheel[:,0])-np.mean(rew_rand))))
 
         file.write('-----------------------------------\n')
         file.write('Time for evaluation: {:5f}\n'.format(time.time() - start))
