@@ -38,7 +38,7 @@ class HIVTreatment(object):
     state_names = ("T1", "T2", "T1*", "T2*", "V", "E")
     eps_values_for_actions = np.array([[0., 0.], [.7, 0.], [0., .3], [.7, .3]])
 
-    def __init__(self, logspace=True, dt=5, model_derivatives=None, perturb_state=False, \
+    def __init__(self, logspace=True, dt=5, model_derivatives=None, perturb_state=True, \
         p_T1=0, p_T2=0, p_T1s=0, p_T2s=0, p_V=0, p_E=0, **kw):
         """
         Initialize the environment.
@@ -69,7 +69,7 @@ class HIVTreatment(object):
             'p_m1','p_m2','p_lambdaE','p_bE','p_Kb','p_d_E','p_Kd')
         self.reset(perturb_state, p_T1, p_T2, p_T1s, p_T2s, p_V, p_E, **kw)
 
-    def reset(self, perturb_state=False, p_T1=0, p_T2=0, p_T1s=0, p_T2s=0, p_V=0, p_E=0, **kw):
+    def reset(self, perturb_state=False, p_T1=0., p_T2=0., p_T1s=0., p_T2s=0., p_V=0., p_E=0., **kw):
         """Reset the environment."""
         self.t = 0
         baseline_state = np.array([163573., 5., 11945., 46., 63919., 24.])
@@ -79,6 +79,9 @@ class HIVTreatment(object):
         else:
             # Slightly perturb initial state of patient
             self.state = baseline_state + (baseline_state * np.array([p_T1, p_T2, p_T1s, p_T2s, p_V, p_E])) # could scale the random perturbations to reduce their effect by multiplyting by d < 1
+
+        # RE: perturb hidden state
+
 
     def observe(self):
         """Return current state."""
@@ -140,7 +143,7 @@ class HIVTreatment(object):
         deriv_args = (eps1, eps2, perturb_params, p_lambda1, p_lambda2, p_k1, p_k2, p_f, p_m1, p_m2, p_lambdaE, p_bE, p_Kb, p_d_E, p_Kd)
         r.set_initial_value(self.state, t0).set_f_params(deriv_args)
         self.state = r.integrate(self.dt)
-        reward = self.calc_reward(action=action)
+        reward = self.calc_reward(action=action)/ 1e4
         return self.observe(), reward, 0
 
 def dsdt(t, s, params):
