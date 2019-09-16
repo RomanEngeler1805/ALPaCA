@@ -120,7 +120,7 @@ class FreeFlyerDynamics:
     }
 
     def __init__(self, randomize_params=False,
-                 rand_init=False,
+                 rand_init=True,
                  discrete_actions=True,
                  configuration='solar'):
         # todo make take argument on single agent vs manipulation

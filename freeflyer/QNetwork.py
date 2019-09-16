@@ -188,11 +188,6 @@ class QNetwork():
         # loss
         self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
         self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
-
-        sigma_pred_inv = tf.linalg.inv(tf.sqrt(tf.linalg.diag(Sigma_pred)))
-        labels = tf.matmul(sigma_pred_inv, tf.reshape(self.Qtarget, [-1,1]))#tf.einsum('i,ik->k', self.Qtarget, tf.sqrt(sigma_pred_inv))
-        predictions = tf.matmul(sigma_pred_inv, tf.reshape(self.Q, [-1,1]))#tf.einsum('i,ik->k', self.Q, tf.sqrt(sigma_pred_inv))
-
         self.loss2 = logdet_Sigma
 
         # tf.losses.huber_loss(labels, predictions, delta=100.)

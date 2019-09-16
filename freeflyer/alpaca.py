@@ -14,28 +14,28 @@ import sys
 from matplotlib import ticker
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.17)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.50)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 9, "Dimensionality of action space")  # only x-y currently
 tf.flags.DEFINE_integer("state_space", 12, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
 tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("latent_space", 32, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 
-tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
+tf.flags.DEFINE_float("learning_rate", 2e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
 
-tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 1.0, "Noise precision (1/var)")
+tf.flags.DEFINE_float("prior_precision", 1.0, "Prior precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.03, "Initial split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 3, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_float("split_ratio", 0.1, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
@@ -201,6 +201,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # loop steps
             step = 0
 
+            Qepisode = []
+
             while step < FLAGS.L_episode:
 
                 # take a step
@@ -212,6 +214,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
+                Qepisode.append([np.max(Qval)])
 
                 # store experience in memory
                 tempbuffer.add(new_experience)
@@ -269,7 +272,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     action_sample[k] = a
 
                 fig, ax = plt.subplots(nrows=3, figsize=[8, 5])
-                ax[0].plot(state_sample[:,0], state_sample[:,1], 'b', marker='o', markersize=12)
+                ax[0].scatter(state_sample[:,0], state_sample[:,1], c=np.asarray(Qepisode))
                 ax[0].plot(state_sample[0, 0], state_sample[0, 1], 'cyan', marker='o', markersize=12)
                 ax[0].plot(env.goal_state[0], env.goal_state[1], 'r', marker='o', markersize=12)
                 ax[0].set_xlim([-10., 10.])
@@ -433,16 +436,27 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # plot value function
             Vmesh = np.zeros([100, 100])
+            dVmesh = np.zeros([100, 100])
             for ii,xx in enumerate(np.linspace(-5., 2., 100)):
                 for jj,yy in enumerate(np.linspace(-2., 2., 100)):
                     st = np.array([xx, yy, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-                    Qst = sess.run(QNet.Qmean, feed_dict={QNet.state: st.reshape(-1,FLAGS.state_space)})
+                    Qst, phi, L0 = sess.run([QNet.Qmean, QNet.phi, QNet.L0], feed_dict={QNet.state: st.reshape(-1,FLAGS.state_space)})
 
+                    vargmax = np.argmax(Qst)
                     Vmesh[ii, jj] = np.max(Qst)
+                    dVmesh[ii, jj] = np.einsum('ia,ij,ja->a', phi.reshape(FLAGS.latent_space, FLAGS.action_space),
+                                                                np.linalg.inv(L0),
+                                                                phi.reshape(FLAGS.latent_space, FLAGS.action_space))[vargmax]
 
-            plt.figure()
-            plt.imshow(np.transpose(Vmesh), extent=[-10., 10., -10., 10.])
-            plt.plot(-1., 0., markersize=20)
+            fig, ax = plt.subplots(ncols=2)
+            ax[0].set_title('V')
+            im = ax[0].imshow(np.transpose(Vmesh), extent=[-10., 10., -10., 10.])
+            ax[0].plot(-1., 0., markersize=20)
+            fig.colorbar(im, ax=ax[0], shrink=0.9, orientation="horizontal", pad=0.1)
+            ax[1].set_title('dV')
+            im = ax[1].imshow(np.transpose(dVmesh), extent=[-10., 10., -10., 10.])
+            ax[1].plot(-1., 0., markersize=20)
+            fig.colorbar(im, ax=ax[1], shrink=0.9, orientation="horizontal", pad=0.1)
             plt.savefig(V_M_dir + 'Epoch_' + str(episode) + '_step_' + str(step) + '_Reward')
             plt.close()
 
