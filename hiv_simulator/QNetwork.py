@@ -39,16 +39,21 @@ class QNetwork():
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
             hidden1 = self.activation(self.hidden1)
 
+            hidden1 = tf.contrib.layers.layer_norm(hidden1)
+
+
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden2 = self.activation(self.hidden2)
+            hidden2 = tf.contrib.layers.layer_norm(hidden2)
             hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden3 = self.activation(self.hidden3)
+            hidden3 = tf.contrib.layers.layer_norm(hidden3)
 
             # single head
             hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,

@@ -20,11 +20,11 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.17)
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 4, "Dimensionality of action space")  # only x-y currently
 tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
-tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 
-tf.flags.DEFINE_float("learning_rate", 1e-3, "Initial learning rate")
+tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
@@ -37,7 +37,7 @@ tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
-tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 8000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
 
@@ -268,21 +268,22 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             plt.plot(state_train)
             plt.xlabel('time')
             plt.ylabel('Concentration')
-            plt.savefig(trajectory_dir+ 'Episode_'+ str(episode))
+            plt.legend(['T1', 'T2', 'T1s', 'T2s', 'V', 'E'], loc='upper right')
+            plt.savefig(trajectory_dir+ 'Episode_'+ str(episode)+ '_rew_'+ str(np.int(np.sum(np.array(rw)) / FLAGS.N_tasks)))
             plt.close()
 
             plt.figure()
             plt.hist(action_train)
             plt.xlabel('action')
             plt.ylabel('count')
-            plt.savefig(histogram_dir + 'Episode_' + str(episode))
+            plt.savefig(histogram_dir + 'Episode_' + str(episode)+ '_rew_'+ str(np.int(np.sum(np.array(rw)) / FLAGS.N_tasks)))
             plt.close()
 
             plt.figure()
             plt.hist(reward_train)
             plt.xlabel('reward')
             plt.ylabel('count')
-            plt.savefig(reward_dir + 'Episode_' + str(episode))
+            plt.savefig(reward_dir + 'Episode_' + str(episode)+ '_rew_'+ str(np.int(np.sum(np.array(rw)) / FLAGS.N_tasks)))
             plt.close()
 
             fig, ax = plt.subplots(ncols=5)
@@ -290,7 +291,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 ax[i].hist(state_train[:,i])
                 ax[i].set_xlabel('state '+str(i))
                 ax[i].set_ylabel('count')
-            plt.savefig(states_dir + 'Episode_' + str(episode))
+            plt.savefig(states_dir + 'Episode_' + str(episode)+ '_rew_'+ str(np.int(np.sum(np.array(rw)) / FLAGS.N_tasks)))
             plt.close()
 
             eps = np.max([0.1, eps*0.98])
