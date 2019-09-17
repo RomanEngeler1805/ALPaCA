@@ -95,8 +95,10 @@ class Qeval():
         #    A = tf.linalg.cholesky(cov)
         #    x = mu + tf.matmul(A, z)
         #except:
-        V, U = tf.linalg.eigh(cov)
-        x = mu + tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
+        #V, U = tf.linalg.eigh(cov)
+        #x = mu + tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
+        A = tf.linalg.cholesky(cov)
+        x = mu + tf.matmul(A, z)
         return x
 
     def _update_posterior(self, phi_hat, reward):
