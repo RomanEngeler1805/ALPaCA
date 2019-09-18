@@ -141,7 +141,7 @@ class QNetwork():
         self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
 
         self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
-        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
+        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
 
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
@@ -202,7 +202,7 @@ class QNetwork():
         self.loss2 = logdet_Sigma
 
         # tf.losses.huber_loss(labels, predictions, delta=100.)
-        self.loss = self.loss0+ self.regularizer* self.loss_reg #self.loss1+ self.loss2
+        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss_reg #self.loss1+ self.loss2
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
@@ -216,8 +216,8 @@ class QNetwork():
             self.gradient_holders.append(placeholder)
 
         # symbolic gradient of loss w.r.t. tvars
-        self.gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
-        #self.gradients = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gradients]
+        gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
+        self.gradients = [(tf.clip_by_value(grad, -1e9, 1e9), var) for grad, var in gradients]
 
         #
         self.updateModel = self.optimizer.apply_gradients(zip(self.gradient_holders, self.tvars))
@@ -273,7 +273,7 @@ class QNetwork():
         # since I don't like to put the noise variance inside the prior
         Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context)) # noise precision
         Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0
-        Lt_inv = tf.linalg.inv(Lt) # posterior variance
+        Lt_inv = tf.linalg.inv(Lt+ 1e-6* tf.eye(self.latent_dim)) # posterior variance RE
         wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
                           tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
         wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean

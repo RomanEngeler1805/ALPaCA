@@ -3,6 +3,7 @@ Deborah Hanus of Harvard DTAK contributed to the implementation.
 """
 import numpy as np
 from scipy.integrate import odeint, ode
+import warnings
 
 # Original attribution information:
 __copyright__ = "Copyright 2013, RLPy http://acl.mit.edu/RLPy"
@@ -88,7 +89,15 @@ class HIVTreatment(object):
     def observe(self):
         """Return current state."""
         if self.logspace:
-            return np.log10(self.state)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                try:
+                    return np.log10(self.state)
+                except:
+                    print('-------------------')
+                    print(self.state)
+                    self.done = 1
+                    return np.zeros(6)
         else:
             return self.state
 
@@ -148,7 +157,8 @@ class HIVTreatment(object):
         r.set_initial_value(self.state, t0).set_f_params(deriv_args)
         self.state = r.integrate(self.dt)
         reward = self.calc_reward(action=action)/ 1e4 # RE reward scaling
-        return self.observe(), reward, 0
+        self.done = 0 # RE
+        return self.observe(), reward, self.done
 
 def dsdt(t, s, params):
     """Wrapper for system derivative with respect to time"""
