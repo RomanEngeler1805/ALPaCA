@@ -234,11 +234,13 @@ class QNetwork():
 
     def _sample_MN(self, mu, cov):
         ''' sample from multi-variate normal '''
-        A = tf.linalg.cholesky(cov)
-        #V, U = tf.linalg.eigh(cov)
-        z = tf.random_normal(shape=[self.latent_dim,1])
-        x = mu + tf.matmul(A, z)
-        #x = mu+ tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
+        z = tf.random_normal(shape=[self.latent_dim, 1])
+        try:
+            V, U = tf.linalg.eigh(cov)
+            x = mu + tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
+        except Exception:
+            A = tf.linalg.cholesky(cov)
+            x = mu + tf.matmul(A, z)
         return x
 
     def _update_posterior(self, phi_hat, reward):

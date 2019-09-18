@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
 
-def plot_Value_fcn(path, env, sess, model, noise_precision, buffer=[]):
+def plot_Value_fcn(path, delta, sess, model, noise_precision, buffer=[]):
     # plot w* phi
     env_rad = np.linspace(0., 1., 5)
     env_pha = np.linspace(0., 2. * np.pi, 20)
@@ -10,32 +10,18 @@ def plot_Value_fcn(path, env, sess, model, noise_precision, buffer=[]):
     env_state = np.concatenate([np.multiply(mesh_rad.reshape(-1, 1), np.cos(mesh_pha.reshape(-1, 1))),
                                 np.multiply(mesh_rad.reshape(-1, 1), np.sin(mesh_pha.reshape(-1, 1)))], axis=1)
 
-    env_delta = env.delta
-
-
+    env_delta = delta
     wt_bar, phi = sess.run([model.w0_bar, model.phi], feed_dict={model.state: env_state, model.nprec: noise_precision})
 
     if buffer:
-        state_train = np.zeros([len(buffer), env.n_dim])
-        action_train = np.zeros([len(buffer), ])
-        reward_train = np.zeros([len(buffer), ])
-        next_state_train = np.zeros((len(buffer), env.n_dim))
-        done_train = np.zeros((len(buffer),1))
-
-        # fill arrays
-        for k, experience in enumerate(buffer):
-            # [s, a, r, s', a*, d]
-            state_train[k] = experience[0]
-            action_train[k] = experience[1]
-            reward_train[k] = experience[2]
-            next_state_train[k] = experience[3]
-            done_train[k] = experience[4]
+        state_train = buffer[0]
+        action_train = buffer[1]
+        reward_train = buffer[2]
+        next_state_train = buffer[3]
+        done_train = buffer[4]
 
         # update
-        wt_bar = sess.run([model.wt_bar],
-               feed_dict={model.context_state: state_train, model.context_action: action_train,
-                          model.context_reward: reward_train, model.context_state_next: next_state_train,
-                          model.context_done: done_train, model.nprec: noise_precision})
+        wt_bar = sess.run([model.wt_bar])
 
     ncols = phi.shape[2]
 
@@ -52,6 +38,8 @@ def plot_Value_fcn(path, env, sess, model, noise_precision, buffer=[]):
             phipos = np.arctan2(state_train[loc, 1], state_train[loc, 0])
             ax[act].scatter(phipos, rpos, marker='o', color='r', s=1. + np.log(reward_train[loc]) * 10)
 
+        ax[act].set_xlim([0,1])
+        ax[act].set_ylim([0,1])
         cb = fig.colorbar(im, ax=ax[act], orientation="horizontal", pad=0.1)
         tick_locator = ticker.MaxNLocator(nbins=4)
         cb.locator = tick_locator

@@ -28,16 +28,16 @@ tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 tf.flags.DEFINE_integer("L_episode", 500, "Length of episodes")
 
 tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.9, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.1, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 400, "Store images every N-th episode")
-tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
+tf.flags.DEFINE_float("regularizer", 1.0, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
-tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
+tf.flags.DEFINE_integer("random_seed", 2345, "Random seed for numpy and tensorflow")
 
 tf.flags.DEFINE_string('model_name', '14-22-31_08-19', 'Name of the model for evaluation')
 
@@ -65,8 +65,6 @@ mean_v = [1.2, 1.0, 1.0, 1.0, 1.0]
 std_v = [0.01, 0.01, 0.01, 0.01, 0.01]
 mu_large = 50
 std_large = 0.01
-
-delta = 0.9
 
 # Create Session
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.12)
