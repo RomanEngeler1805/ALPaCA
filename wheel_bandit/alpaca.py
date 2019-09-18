@@ -161,7 +161,7 @@ for ds in range(num_datasets):
 
 # evaluation
 num_eval = 2000
-eval_batch_size = 1000
+eval_batch_size = 500
 n_shuffle = 50
 deltas_eval = np.array([0.5, 0.7, 0.9, 0.95, 0.99])
 
@@ -277,11 +277,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 if (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
 
                     # update
-                    _ = sess.run([QNet.sample_post],
-                             feed_dict={QNet.context_state: state.reshape(-1,2),
-                                        QNet.context_action: action.reshape(-1),
-                                        QNet.context_reward: reward.reshape(-1),
-                                        QNet.nprec: noise_precision, QNet.is_online: True})
+                    try:
+                        _ = sess.run([QNet.sample_post],
+                                 feed_dict={QNet.context_state: state.reshape(-1,2),
+                                            QNet.context_action: action.reshape(-1),
+                                            QNet.context_reward: reward.reshape(-1),
+                                            QNet.nprec: noise_precision, QNet.is_online: True})
+                    except:
+                        _ = sess.run([QNet.sample_post],
+                                     feed_dict={QNet.context_state: state.reshape(-1, 2),
+                                                QNet.context_action: action.reshape(-1),
+                                                QNet.context_reward: reward.reshape(-1),
+                                                QNet.nprec: noise_precision, QNet.is_online: True,
+                                                QNet.use_cholesky: False})
 
                 # update state, and counters
                 step += 1
@@ -390,7 +398,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio + 0.003, FLAGS.split_ratio_max])
+            split_ratio = np.min([split_ratio + 0.001, FLAGS.split_ratio_max])
 
         # ===============================================================
         # print to console
@@ -454,12 +462,21 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                             plot_Value_fcn(path, deval, sess, QNet, noise_precision, buff)
 
                         # calculate posterior
-                        sess.run(QNet.sample_post,
-                                 feed_dict={QNet.context_state: dataset_eval[de, i-1: i, :2].reshape(-1, FLAGS.state_space),
-                                            QNet.context_action: actions[:i],
-                                            QNet.context_reward: rew_agent_online[:i],
-                                            QNet.nprec: FLAGS.noise_precision,
-                                            QNet.is_online: True})
+                        try:
+                            _ = sess.run([QNet.sample_post],
+                                         feed_dict={QNet.context_state: dataset_eval[de, i - 1: i, :2].reshape(-1, FLAGS.state_space),
+                                                    QNet.context_action: actions[:i],
+                                                    QNet.context_reward: rew_agent_online[:i],
+                                                    QNet.nprec: FLAGS.noise_precision,
+                                                    QNet.is_online: True})
+                        except:
+                            print(episode)
+                            _ = sess.run([QNet.sample_post],
+                                         feed_dict={QNet.context_state: dataset_eval[de, i - 1: i, :2].reshape(-1, FLAGS.state_space),
+                                                    QNet.context_action: actions[:i],
+                                                    QNet.context_reward: rew_agent_online[:i],
+                                                    QNet.nprec: FLAGS.noise_precision,
+                                                    QNet.is_online: True, QNet.use_cholesky: False})
 
                         # prediction
                         Qval = sess.run([QNet.Qout], feed_dict={QNet.state: dataset_eval[de, i, :2].reshape(-1, FLAGS.state_space)})

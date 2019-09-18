@@ -22,6 +22,7 @@ class Qeval():
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
 
         self.is_online = tf.placeholder_with_default(False, shape=[], name='is_online')
+        self.use_cholesky = tf.placeholder_with_default(True, shape=[], name='use_cholesky')
 
         # placeholders context data =======================================================
         self.context_phi = tf.placeholder(shape=[None, self.latent_dim, self.action_dim], dtype=tf.float32, name='context_phi')  # input
@@ -80,24 +81,28 @@ class Qeval():
 
     def _sample_prior(self):
         ''' sample wt from prior '''
-        update_op = tf.assign(self.wt, self._sample_MN(self.w0_bar, tf.matrix_inverse(self.L0)))
+        update_op = tf.assign(self.wt, self._sample_MN_cholesky(self.w0_bar, tf.matrix_inverse(self.L0)))
         return update_op
 
     def _sample_posterior(self, wt_bar, Lt_inv):
         ''' sample wt from posterior '''
-        update_op = tf.assign(self.wt, self._sample_MN(wt_bar, Lt_inv))
+        update_op = tf.assign(self.wt, tf.cond(self.use_cholesky,
+                                               lambda: self._sample_MN_cholesky(wt_bar, Lt_inv),
+                                               lambda: self._sample_MN_eigh(wt_bar, Lt_inv)))
         return update_op
 
-    def _sample_MN(self, mu, cov):
+    def _sample_MN_cholesky(self, mu, cov):
         ''' sample from multi-variate normal '''
         z = tf.random_normal(shape=[self.latent_dim, 1])
-        try:
-            V, U = tf.linalg.eigh(cov)
-            x = mu + tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
-        except tf.errors.InvalidArgumentError:
-            A = tf.linalg.cholesky(cov)
-            x = mu + tf.matmul(A, z)
+        A = tf.linalg.cholesky(cov)
+        x = mu + tf.matmul(A, z)
+        return x
 
+    def _sample_MN_eigh(self, mu, cov):
+        ''' sample from multi-variate normal '''
+        z = tf.random_normal(shape=[self.latent_dim, 1])
+        V, U = tf.linalg.eigh(cov)
+        x = mu + tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
         return x
 
     def _update_posterior(self, phi_hat, reward):

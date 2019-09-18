@@ -28,7 +28,7 @@ tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 tf.flags.DEFINE_integer("L_episode", 500, "Length of episodes")
 
 tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.1, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.9, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
@@ -37,9 +37,10 @@ tf.flags.DEFINE_integer("save_frequency", 400, "Store images every N-th episode"
 tf.flags.DEFINE_float("regularizer", 1.0, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
-tf.flags.DEFINE_integer("random_seed", 2345, "Random seed for numpy and tensorflow")
+tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
 
 tf.flags.DEFINE_string('model_name', '14-22-31_08-19', 'Name of the model for evaluation')
+tf.flags.DEFINE_string('checkpoint', 'latest', 'Name of checkpoint to restore')
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
@@ -74,8 +75,12 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
     saver = tf.train.Saver(max_to_keep=4)
     #saver.restore(sess, tf.train.latest_checkpoint(load_dir))
-    saver.restore(sess, load_dir+'model-2800')
-    print('Successfully restored model from '+ str(tf.train.latest_checkpoint(load_dir)))
+    try:
+        saver.restore(sess, load_dir + FLAGS.checkpoint)
+        print('Successfully restored model from ' + FLAGS.checkpoint)
+    except:
+        saver.restore(sess, tf.train.latest_checkpoint(load_dir))
+        print('Successfully restored model from '+ str(tf.train.latest_checkpoint(load_dir)))
 
     # Loop over deltas (exploration parameter)
     for delta in [0.5, 0.7, 0.9, 0.95, 0.99]:
@@ -122,12 +127,33 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             for i in range(np.int(FLAGS.split_ratio* FLAGS.L_episode)):
 
                 # calculate posterior
-                sess.run(Qeval.sample_post,
+                try:
+                    sess.run(Qeval.sample_post,
+                                feed_dict={Qeval.context_phi: phi[data_idx[:i]],
+                                        Qeval.context_action: actions[:i],
+                                        Qeval.context_reward: rew_agent_online[:i],
+                                        Qeval.nprec: FLAGS.noise_precision,
+                                        Qeval.is_online: True, Qeval.use_cholesky: False})
+                except:
+                    lttest = sess.run(Qeval.Lt_inv,
                             feed_dict={Qeval.context_phi: phi[data_idx[:i]],
-                                    Qeval.context_action: actions[:i],
-                                    Qeval.context_reward: rew_agent_online[:i],
-                                    Qeval.nprec: FLAGS.noise_precision,
-                                    Qeval.is_online: True})
+                                        Qeval.context_action: actions[:i],
+                                        Qeval.context_reward: rew_agent_online[:i],
+                                        Qeval.nprec: FLAGS.noise_precision,
+                                        Qeval.is_online: True})
+                    print(lttest.shape)
+                    for l in range(len(lttest)):
+                        print(lttest[l])
+                    with open(save_dir + 'cholesky', 'a') as f:
+                        for line in lttest:
+                            np.savetxt(f, line, fmt='%.2f')
+
+                    sess.run(Qeval.sample_post,
+                             feed_dict={Qeval.context_phi: phi[data_idx[:i]],
+                                        Qeval.context_action: actions[:i],
+                                        Qeval.context_reward: rew_agent_online[:i],
+                                        Qeval.nprec: FLAGS.noise_precision,
+                                        Qeval.is_online: True})
 
                 # prediction
                 Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
@@ -176,9 +202,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         dsimple_regret_norm = 100. / np.sqrt(num_datasets) * sstdv_reward_agent / (smean_reward_opt - smean_reward_rand)
 
 
-        file = open(save_dir+ FLAGS.model_name, 'a')
+        file = open(save_dir+ FLAGS.model_name+ '_checkpoint_'+ FLAGS.checkpoint, 'a')
         file.write('===================================\n')
         file.write('=========== delta = '+ str(delta) +' ==========\n')
+        '''
         file.write('Reward LSTD: \n')
         file.write('{:6.2f} +- {:5.2f} ({:2.0f} %)\n'.format(mean_reward_agent,
                                             stdv_reward_agent,
@@ -193,14 +220,17 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         file.write('{:6}\n'.format(mean_reward_opt))
 
         file.write('-----------------------------------\n')
+        '''
+
         file.write('Cumulative Regret: \n')
         file.write('{:3.2f}% +- {:2.2f}%\n'.format(cum_regret_norm, dcum_regret_norm))
 
         file.write('Simple Regret: \n')
         file.write('{:3.2f}% +- {:2.2f}%\n'.format(simple_regret_norm, dsimple_regret_norm))
 
+        '''
         file.write('-----------------------------------\n')
         file.write('Time for evaluation: {:5f}\n'.format(time.time() - start))
-        file.write('===================================\n')
+        '''
 
         file.close()
