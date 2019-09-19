@@ -20,7 +20,7 @@ tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 2, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 64, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 
 tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
@@ -33,7 +33,7 @@ tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N ste
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.1, "Initial split ratio for conditioning")
 tf.flags.DEFINE_float("split_ratio_max", 512./562, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
@@ -398,7 +398,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio + 0.001, FLAGS.split_ratio_max])
+            split_ratio = np.min([split_ratio + 0.003, FLAGS.split_ratio_max])
 
         # ===============================================================
         # print to console
@@ -418,10 +418,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 rew_agent_episode_cumulative = np.zeros([num_datasets])
                 rew_rand_episode_cumulative = np.zeros([num_datasets])
 
-                rew_agent_episode_simple = np.zeros([num_datasets])
-                rew_rand_episode_simple = np.zeros([num_datasets])
-                rew_opt_episode_simple = np.zeros([num_datasets])
-
                 # array to keep track of indices of shuffled array
                 shuffle_idx = np.arange(num_eval)
 
@@ -434,15 +430,14 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 plot_Value_fcn(path, deval, sess, QNet, noise_precision)
 
                 # -----------------------------------------------------------------------------------------------
-
+                # loop and reshuffle dataset
                 for sh in range(n_shuffle):
-
+                    # reshuffle data set
                     np.random.shuffle(shuffle_idx)
-
                     dataset_eval[de] = dataset_eval[de, shuffle_idx, :]
                     opt_wheel_eval[de] = opt_wheel_eval[de, shuffle_idx, :]
 
-                    # array
+                    # arrays to keep track of actions and rewards
                     actions = np.zeros(num_eval)
                     rew_agent_online = np.zeros(num_eval)
                     rew_rand_online = np.zeros(num_eval)
@@ -451,7 +446,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     sess.run(QNet.reset_post)
                     sess.run([QNet.sample_prior])
 
-                    # loop over dataset
+                    # loop over dataset (context part)
                     for i in range(np.int(split_ratio * FLAGS.L_episode)):
 
                         # plot
@@ -461,43 +456,35 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                             buff = [dataset_eval[de, :, :2], actions[:i], rew_agent_online[:i], np.zeros([i,2]), np.zeros([i])]
                             plot_Value_fcn(path, deval, sess, QNet, noise_precision, buff)
 
-                        # calculate posterior
-                        try:
-                            _ = sess.run([QNet.sample_post],
-                                         feed_dict={QNet.context_state: dataset_eval[de, i - 1: i, :2].reshape(-1, FLAGS.state_space),
-                                                    QNet.context_action: actions[:i],
-                                                    QNet.context_reward: rew_agent_online[:i],
-                                                    QNet.nprec: FLAGS.noise_precision,
-                                                    QNet.is_online: True})
-                        except:
-                            print(episode)
-                            _ = sess.run([QNet.sample_post],
-                                         feed_dict={QNet.context_state: dataset_eval[de, i - 1: i, :2].reshape(-1, FLAGS.state_space),
-                                                    QNet.context_action: actions[:i],
-                                                    QNet.context_reward: rew_agent_online[:i],
-                                                    QNet.nprec: FLAGS.noise_precision,
-                                                    QNet.is_online: True, QNet.use_cholesky: False})
-
                         # prediction
                         Qval = sess.run([QNet.Qout], feed_dict={QNet.state: dataset_eval[de, i, :2].reshape(-1, FLAGS.state_space)})
                         action = eGreedyAction(Qval, eps)
 
+                        # store values
                         actions[i] = action
                         rew_agent_online[i] = dataset_eval[de, i, 2 + action]
                         rew_rand_online[i] = dataset_eval[de, i, 2 + np.random.randint(0, 5)]
 
+                        # calculate posterior
+                        _ = sess.run([QNet.sample_post],
+                                     feed_dict={QNet.context_state: dataset_eval[de, i:i+1, :2],
+                                                QNet.context_action: actions[i:i+1],
+                                                QNet.context_reward: rew_agent_online[i:i+1],
+                                                QNet.nprec: FLAGS.noise_precision,
+                                                QNet.is_online: True, QNet.use_cholesky: False})
 
+                    # after context
                     for i in range(np.int(split_ratio * FLAGS.L_episode), num_eval, eval_batch_size):
                         # prediction
-                        Qval = sess.run(QNet.Qout, feed_dict={
-                            QNet.state: dataset_eval[de, i:i + eval_batch_size, :2].reshape(-1, FLAGS.state_space)})
+                        Qval = sess.run(QNet.Qout, feed_dict={QNet.state: dataset_eval[de, i:i+eval_batch_size, :2].reshape(-1, FLAGS.state_space)})
                         action = np.argmax(Qval, axis=1)
 
+                        # store values
                         actions[i:i + len(action)] = action
-                        rew_agent_online[i:i + eval_batch_size] = dataset_eval[de, i:i + eval_batch_size][np.arange(len(action)), 2 + action]
-                        rew_rand_online[i:i + eval_batch_size] = dataset_eval[de, i:i + eval_batch_size][np.arange(len(action)), 2 + np.random.randint(0, 5, size=len(action))]
+                        rew_agent_online[i:i+eval_batch_size] = dataset_eval[de, i:i+eval_batch_size][np.arange(len(action)), 2 + action]
+                        rew_rand_online[i:i+eval_batch_size] = dataset_eval[de, i:i+eval_batch_size][np.arange(len(action)), 2 + np.random.randint(0, 5, size=len(action))]
 
-                    # store observed reward
+                    # save observed online reward (sum)
                     rew_agent_episode_cumulative[sh] = np.sum(rew_agent_online)
                     rew_rand_episode_cumulative[sh] = np.sum(rew_rand_online)
 
@@ -518,9 +505,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 tag_name = 'Validation Cumulative Regret (delta '+ str(deval)+ ')'
                 regret_norm_summary = tf.Summary(value=[tf.Summary.Value(tag=tag_name, simple_value=cum_regret_norm)])
                 summary_writer.add_summary(regret_norm_summary, episode)
-
             summary_writer.flush()
-
 
     # write reward to file
     df = pd.DataFrame(reward_episode)

@@ -52,7 +52,7 @@ class Qeval():
         self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
         self.wt = tf.get_variable('wt', shape=[self.latent_dim,1], trainable=False)
-        self.Qout = tf.einsum('im,bia->ba', self.wt, self.phi, name='Qout')
+
 
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
@@ -62,6 +62,8 @@ class Qeval():
         self.wt_bar = tf.get_variable('wt_bar', initializer=self.w0_bar, trainable=False)
         self.Lt_inv = tf.get_variable('Lt_inv', initializer=tf.linalg.inv(self.L0), trainable=False)
         self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
+
+        self.Qout = tf.einsum('im,bia->ba', self.wt_bar, self.phi, name='Qout')
 
         wt_bar, Lt_inv = tf.cond(bsc > 0,
                                  lambda: tf.cond(self.is_online,

@@ -3,7 +3,6 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from QNetwork import QNetwork
 from synthetic_data_sampler import sample_wheel_bandit_data
-from evaluation_tf import Qeval
 import sys
 import time
 import os
@@ -31,11 +30,13 @@ tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
 
-tf.flags.DEFINE_string('model_name', '14-22-31_08-19', 'Name of the model for evaluation')
-tf.flags.DEFINE_string('checkpoint', 'latest', 'Name of checkpoint to restore')
+tf.flags.DEFINE_string('model_name', '18-20-18_09-19', 'Name of the model for evaluation')
+tf.flags.DEFINE_string('checkpoint', '3600', 'Name of checkpoint to restore')
 
 FLAGS = tf.flags.FLAGS
 FLAGS(sys.argv)
+
+from gp_numpy import Bayesian_regression
 
 # load tf model
 load_dir = './model/'+ FLAGS.model_name+ '/'
@@ -48,6 +49,7 @@ if not os.path.exists(save_dir):
 num_contexts = 80000
 num_datasets = 100
 batch_size = 1000
+context = 10000
 
 num_actions = 5
 context_dim = 2
@@ -60,7 +62,6 @@ std_large = 0.01
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.12)
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     QNet = QNetwork(FLAGS)
-    Qeval = Qeval(FLAGS)
 
     # restore model
     saver = tf.train.Saver(max_to_keep=4)
@@ -70,6 +71,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     except:
         saver.restore(sess, tf.train.latest_checkpoint(load_dir))
         print('Successfully restored model from '+ str(tf.train.latest_checkpoint(load_dir)))
+
+    w0, L0 = sess.run([QNet.w0_bar, QNet.L0])
 
     # Loop over deltas (exploration parameter)
     for delta in [0.5, 0.7, 0.9, 0.95, 0.99]:
@@ -107,32 +110,27 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             rew_agent_online = np.zeros(num_contexts)
             rew_rand_online = np.zeros(num_contexts)
 
-            # sample prior (reset for new evaluation)
-            sess.run(QNet.reset_post)
-            sess.run(Qeval.sample_prior)
+            gp_fun = Bayesian_regression(w0, L0, 1. / FLAGS.noise_precision, FLAGS.latent_space)
+            gp_fun.sample_mvn()
 
             # loop over dataset (context part)
-            for i in range(10000):
+            for i in range(context):
                 # prediction
-                Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
+                Qval = gp_fun.predict(phi[data_idx[i:i+1]])
                 action = np.argmax(Qval, axis=1)
 
                 actions[i] = action
-                rew_agent_online[i] = dataset[data_idx[i], 2 + action]
-                rew_rand_online[i] = dataset[data_idx[i], 2 + np.random.randint(0, 5)]
+                rew_agent_online[i] = dataset[data_idx[i:i+1], 2 + action]
+                rew_rand_online[i] = dataset[data_idx[i:i+1], 2 + np.random.randint(0, 5)]
 
                 # calculate posterior via online updates -> only feed new data point
-                sess.run(Qeval.sample_post,
-                        feed_dict={Qeval.context_phi: phi[data_idx[i]].reshape(-1, FLAGS.latent_space, FLAGS.action_space),
-                                    Qeval.context_action: actions[i:i+1],
-                                    Qeval.context_reward: rew_agent_online[i:i+1],
-                                    Qeval.nprec: FLAGS.noise_precision,
-                                    Qeval.is_online: True, Qeval.use_cholesky: False})
+                gp_fun.update_posterior(phi[data_idx[i], :, action], rew_agent_online[i:i+1]) # XXXX
+                gp_fun.sample_mvn()
 
             # after context
-            for i in range(10000, num_contexts, batch_size):
+            for i in range(context, num_contexts, batch_size):
                 # prediction
-                Qval = sess.run(Qeval.Qout, feed_dict={Qeval.phi: phi[data_idx[i:i+batch_size]].reshape(-1, FLAGS.latent_space, FLAGS.action_space)})
+                Qval = gp_fun.predict(phi[data_idx[i:i+batch_size]])
                 action = np.argmax(Qval, axis=1)
 
                 actions[i:i+batch_size] = action
