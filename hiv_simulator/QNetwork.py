@@ -273,7 +273,7 @@ class QNetwork():
         # since I don't like to put the noise variance inside the prior
         Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context)) # noise precision
         Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0
-        Lt_inv = tf.linalg.inv(Lt+ 1e-6* tf.eye(self.latent_dim)) # posterior variance RE
+        Lt_inv = tf.linalg.inv(Lt) # posterior variance
         wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
                           tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
         wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean

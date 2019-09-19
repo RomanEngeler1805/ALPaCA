@@ -39,6 +39,7 @@ class replay_buffer():
         self.num_experiences += 1
 
 
+
     def reset(self):
         self.buffer = [] #.clear()
         self.num_experiences = 0
