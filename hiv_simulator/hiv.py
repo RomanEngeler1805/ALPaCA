@@ -40,7 +40,7 @@ class HIVTreatment(object):
     eps_values_for_actions = np.array([[0., 0.], [.7, 0.], [0., .3], [.7, .3]])
 
     def __init__(self, logspace=True, dt=5, model_derivatives=None, perturb_state=True, \
-        p_T1=0, p_T2=0, p_T1s=0, p_T2s=0, p_V=0, p_E=0, **kw):
+        p_T1=0, p_T2=0, p_T1s=0, p_T2s=0, p_V=0, p_E=0, rew_norm=1., **kw):
         """
         Initialize the environment.
         Keyword arguments:
@@ -65,6 +65,7 @@ class HIVTreatment(object):
         self.model_derivatives = model_derivatives
         self.dt = dt
         self.reward_bound = 1e300
+        self.rew_norm = rew_norm
         self.num_actions = 4
         self.perturb_params = ('p_lambda1','p_lambda2','p_k1','p_k2','p_f', \
             'p_m1','p_m2','p_lambdaE','p_bE','p_Kb','p_d_E','p_Kd')
@@ -156,7 +157,7 @@ class HIVTreatment(object):
         deriv_args = (eps1, eps2, perturb_params, p_lambda1, p_lambda2, p_k1, p_k2, p_f, p_m1, p_m2, p_lambdaE, p_bE, p_Kb, p_d_E, p_Kd)
         r.set_initial_value(self.state, t0).set_f_params(deriv_args)
         self.state = r.integrate(self.dt)
-        reward = self.calc_reward(action=action)/ 1e4 # RE reward scaling
+        reward = self.calc_reward(action=action)/ self.rew_norm# RE reward scaling
         self.done = 0 # RE
         return self.observe(), reward, self.done
 
