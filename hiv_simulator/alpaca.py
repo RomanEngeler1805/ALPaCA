@@ -22,23 +22,24 @@ tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 4, "Dimensionality of action space")  # only x-y currently
 tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
 tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
-tf.flags.DEFINE_float("gamma", 0.8, "Discount factor")
+tf.flags.DEFINE_integer("latent_space", 22, "Dimensionality of latent space")
+tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
 
 tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate") # X
 tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.001, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 5, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
-tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.9, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
+tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.0, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
-tf.flags.DEFINE_integer("N_episodes", 8000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
 
@@ -49,9 +50,11 @@ tf.flags.DEFINE_float("rew_norm", 1e4, "Normalization factor for reward") # X
 
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 1e-3, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
+
+tf.flags.DEFINE_integer("param_case", 5, "Which of the 6 test param sets")
 
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
 
@@ -81,7 +84,7 @@ def eGreedyAction(x, epsilon=0.):
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.1
+eps = 0.9
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -199,7 +202,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # reset environment
             env.reset()
-            preset_hidden_params = preset_parameters[episode % 3]
+            preset_hidden_params = preset_parameters[episode%6]
             env.param_set = preset_hidden_params
             state = env.observe()
 
@@ -207,7 +210,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             sess.run([QNet.reset_post])
             sess.run([QNet.sample_prior])
 
+            if episode % FLAGS.save_frequency == 0:
+                print(sess.run(QNet.w0_bar)[:5].reshape(1,-1))
+
             # loop steps
+
             step = 0
             flag = True
 
@@ -250,6 +257,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                                     QNet.context_done: np.array(done).reshape(-1,1),
                                                     QNet.nprec: noise_precision, QNet.is_online: True})
                     # -----------------------------------------------------------------------
+
+                    if episode % FLAGS.save_frequency == 0:
+                        print(wt_bar[:5].reshape(1,-1))
 
                 # -----------------------------------------------------------------------
             if flag:
@@ -311,7 +321,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             plt.savefig(states_dir + 'Episode_' + str(episode))
             plt.close()
 
-            eps = np.max([0.1, eps*0.9])
+        if episode % 50 == 0:
+            eps = np.max([0.1, eps*0.97])
             print(eps)
 
         # ==================================================================================
@@ -441,7 +452,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         lossregBuffer *= 0.
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-        if episode < 2:
+        if episode < 4:
             batch_size *= 2
 
         # learning rate schedule
@@ -450,6 +461,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
+
+        if episode % FLAGS.split_N == 0 and episode > 0:
+            split_ratio = np.min([split_ratio + 0.003, FLAGS.split_ratio_max])
 
         # ===============================================================
         # update target network
@@ -482,9 +496,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             with open('./'+'hiv'+'_preset_hidden_params','r') as f:
                 preset_parameters = pickle.load(f)
 
-            rew_eval = np.zeros(3)
+            for i_eval in range(6):
+                rew_eval = 0.
 
-            for i_eval in range(3):
                 tempbuffer.reset()
                 preset_hidden_params = preset_parameters[i_eval]
 
@@ -515,7 +529,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     tempbuffer.add(new_experience)
 
                     # actual reward
-                    rew_eval[i_eval]+= reward
+                    rew_eval+= reward
 
                     # update state, and counters
                     state = next_state.copy()
@@ -537,8 +551,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                         # -----------------------------------------------------------------------
 
-            reward_eval_summary = tf.Summary(value=[tf.Summary.Value(tag='Reward Eval', simple_value=np.mean(rew_eval)* FLAGS.rew_norm)])
-            summary_writer.add_summary(reward_eval_summary, episode)
+                reward_eval_summary = tf.Summary(value=[tf.Summary.Value(tag='Reward Eval '+str(i_eval), simple_value=rew_eval* FLAGS.rew_norm)])
+                summary_writer.add_summary(reward_eval_summary, episode)
+                summary_writer.flush()
 
     # write reward to file
     df = pd.DataFrame(reward_episode)

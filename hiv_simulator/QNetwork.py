@@ -38,17 +38,20 @@ class QNetwork():
             self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
             hidden1 = self.activation(self.hidden1)
+            hidden1 = tf.contrib.layers.layer_norm(hidden1)
 
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden2 = self.activation(self.hidden2)
+            hidden2 = tf.contrib.layers.layer_norm(hidden2)
             hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden3 = self.activation(self.hidden3)
+            hidden3 = tf.contrib.layers.layer_norm(hidden3)
 
             # single head
             hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
@@ -129,14 +132,14 @@ class QNetwork():
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
         self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
         L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
-        self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
+        self.L0 = tf.exp(L0_asym)#tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
         self.wt_bar = tf.get_variable('wt_bar', initializer=self.w0_bar, trainable=False)
         self.Lt_inv = tf.get_variable('Lt_inv', initializer=tf.linalg.inv(self.L0), trainable=False)
         self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
 
         self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
-        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
+        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
 
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
@@ -197,7 +200,7 @@ class QNetwork():
         self.loss2 = logdet_Sigma
 
         # tf.losses.huber_loss(labels, predictions, delta=100.)
-        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss_reg
+        self.loss = self.loss0+ self.regularizer* self.loss_reg
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
@@ -212,7 +215,7 @@ class QNetwork():
 
         # symbolic gradient of loss w.r.t. tvars
         gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
-        self.gradients = [(tf.clip_by_value(grad, -1e9, 1e9), var) for grad, var in gradients]
+        self.gradients = [(tf.clip_by_value(grad, -1e6, 1e6), var) for grad, var in gradients]
 
         #
         self.updateModel = self.optimizer.apply_gradients(zip(self.gradient_holders, self.tvars))
