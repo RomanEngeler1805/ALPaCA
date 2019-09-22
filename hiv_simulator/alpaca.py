@@ -35,8 +35,8 @@ tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N step
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.5, "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.5, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.25, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.25, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")

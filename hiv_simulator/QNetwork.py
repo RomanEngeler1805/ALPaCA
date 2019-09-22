@@ -148,14 +148,14 @@ class QNetwork():
         taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
         phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
 
-        wt_bar, Lt_inv = tf.cond(bsc > 0,
-                                 lambda: tf.cond(self.is_online,
-                                                 lambda: self._update_posterior_online(self.context_phi_next, self.context_phi_taken, self.context_reward),
-                                                 lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken, self.context_reward)),
-                                 lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+        _, _, _, wt_bar, Lt_inv = tf.cond(bsc > 0,
+                lambda: tf.scan(self._update_posterior_online,
+                    elems=(self.context_phi_next, self.context_phi_taken, self.context_reward, self.wt_unnorm,
+                           tf.reshape(self.wt_bar, [1, self.latent_dim]), tf.reshape(self.Lt_inv, [1, self.latent_dim, self.latent_dim]))),
+                lambda: (_, _, _, self.w0_bar, tf.linalg.inv(self.L0)))
 
-        self.w_assign = tf.assign(self.wt_bar, wt_bar)
-        self.L_assign = tf.assign(self.Lt_inv, Lt_inv)
+        wt_bar = wt_bar[-1]
+        Lt_inv = Lt_inv[-1]
 
         self.sample_prior = self._sample_prior()
         self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
@@ -280,30 +280,30 @@ class QNetwork():
         return wt_bar, Lt_inv
 
 
-    def _update_posterior_online(self, phi_next, phi_taken, reward):
+    def _update_posterior_online(self, old_values, new_values):
+
+        (phi_next, phi_taken, reward, wt_unnorm, wt_bar, Lt_inv) = old_values
+
         # max action
-        Q_next = tf.einsum('ijk,jl->ik', phi_next, self.wt_bar)
+        Q_next = tf.einsum('ia,i->a', phi_next, wt_bar)
         max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
         phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
         phi_hat = phi_taken - self.gamma * phi_max
 
         # variance
-        denum = 1. / self.nprec + tf.einsum('bi,ij,bj->b', phi_hat, self.Lt_inv, phi_hat)
+        denum = 1. / self.nprec + tf.einsum('bi,ij,bj->b', phi_hat, Lt_inv, phi_hat)
         denum = tf.reciprocal(denum)
 
-        num = tf.einsum('ij,bj->bi', self.Lt_inv, phi_hat)
+        num = tf.einsum('ij,bj->bi', Lt_inv, phi_hat)
         num = tf.einsum('bi,bj->bij', num, num)
 
-        Lt_inv = self.Lt_inv - tf.einsum('b,bij->ij', denum, num)
+        Lt_inv = Lt_inv - tf.einsum('b,bij->ij', denum, num)
 
         # mean
-        wt_unnorm = self.wt_unnorm + self.nprec * tf.reshape(tf.einsum('bi,b->i', phi_hat, reward), [-1, 1])  # XXXXXXXXXx
-        update_op = tf.assign(self.wt_unnorm, wt_unnorm)
+        wt_unnorm = wt_unnorm + self.nprec * tf.reshape(phi_hat,[-1,1])* reward   # XXXXXXXXXx
+        wt_bar = tf.matmul(Lt_inv, wt_unnorm)
 
-        with tf.control_dependencies([update_op]):
-            wt_bar = tf.matmul(Lt_inv, wt_unnorm)
-
-        return wt_bar, Lt_inv
+        return (phi_next, phi_taken, reward, wt_unnorm, wt_bar, Lt_inv)
 
     def _max_posterior(self, phi_next, phi_taken, reward):
         ''' determine wt_bar for calculating phi(s_{t+1}, a*) '''
