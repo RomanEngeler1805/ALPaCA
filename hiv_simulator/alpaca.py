@@ -373,12 +373,15 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # select amax from online network
             amax_online = sess.run(QNet.max_action,
-                                   feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
-                                              QNet.context_reward: reward_train,
-                                              QNet.context_state_next: next_state_train,
+                                   feed_dict={QNet.context_state: state_train.reshape(-1, FLAGS.state_space),
+                                              QNet.context_action: action_train.reshape(-1),
+                                              QNet.context_reward: reward_train.reshape(-1),
+                                              QNet.context_state_next: next_state_train.reshape(-1, FLAGS.state_space),
+                                              QNet.context_done: done_train.reshape(-1,1),
                                               QNet.state: state_valid, QNet.state_next: next_state_valid,
-                                              QNet.nprec: noise_precision,
-                           QNet.is_online: False})
+                                              QNet.nprec: noise_precision, QNet.is_online: True})
+
+
 
             # evaluate target model
             phi_max_target = sess.run(Qtarget.phi_max,
@@ -391,9 +394,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # update model
             grads, loss, loss1, loss2, lossreg, Qdiff = sess.run(
                 [QNet.gradients, QNet.loss, QNet.loss1, QNet.loss2, QNet.loss_reg, QNet.Qdiff],
-                feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
-                           QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
-                           QNet.state: state_valid, QNet.action: action_valid,
+                feed_dict={QNet.context_state: state_train.reshape(-1, FLAGS.state_space),
+                           QNet.context_action: action_train.reshape(-1),
+                           QNet.context_reward: reward_train.reshape(-1),
+                           QNet.context_state_next: next_state_train.reshape(-1, FLAGS.state_space),
+                           QNet.context_done: done_train.reshape(-1,1),
+                           QNet.state: state_valid,
+                           QNet.action: action_valid,
                            QNet.reward: reward_valid, QNet.state_next: next_state_valid,
                            QNet.done: done_valid,
                            QNet.phi_max_target: phi_max_target, QNet.amax_online: amax_online,
