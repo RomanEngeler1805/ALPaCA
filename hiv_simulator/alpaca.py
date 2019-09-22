@@ -35,8 +35,8 @@ tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N step
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.9, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.5, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.5, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
@@ -246,7 +246,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 state = next_state.copy()
                 step += 1
 
-                _, _ = sess.run([QNet.w_assign, QNet.L_assign],
+                _ , _ = sess.run([QNet.w_assign, QNet.L_assign],
                                      feed_dict={QNet.context_state: state.reshape(-1, FLAGS.state_space),
                                                 QNet.context_action: np.array(action).reshape(-1),
                                                 QNet.context_reward: np.array(reward).reshape(-1),
@@ -261,7 +261,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     # -----------------------------------------------------------------------
 
                     if episode % FLAGS.save_frequency == 0:
-                        print(wt_bar[:5].reshape(1,-1))
+                        print(sess.run(QNet.wt_bar)[:5].reshape(1,-1))
 
                 # -----------------------------------------------------------------------
             if flag:
@@ -386,8 +386,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                               Qtarget.context_reward: reward_train,
                                               Qtarget.context_state_next: next_state_train,
                                               Qtarget.state: state_valid, Qtarget.state_next: next_state_valid,
-                                              Qtarget.amax_online: amax_online, Qtarget.nprec: noise_precision,
-                           QNet.is_online: False})
+                                              Qtarget.amax_online: amax_online})
 
             # update model
             grads, loss, loss1, loss2, lossreg, Qdiff = sess.run(
