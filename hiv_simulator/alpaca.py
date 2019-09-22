@@ -35,8 +35,8 @@ tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N step
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.0, "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.0, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.9, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
@@ -84,7 +84,7 @@ def eGreedyAction(x, epsilon=0.):
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.9
+eps = 0.
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -246,16 +246,18 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 state = next_state.copy()
                 step += 1
 
+                _, _ = sess.run([QNet.w_assign, QNet.L_assign],
+                                     feed_dict={QNet.context_state: state.reshape(-1, FLAGS.state_space),
+                                                QNet.context_action: np.array(action).reshape(-1),
+                                                QNet.context_reward: np.array(reward).reshape(-1),
+                                                QNet.context_state_next: next_state.reshape(-1, FLAGS.state_space),
+                                                QNet.context_done: np.array(done).reshape(-1, 1),
+                                                QNet.nprec: noise_precision, QNet.is_online: True})
+
                 # update posterior iteratively
                 if (step + 1) % FLAGS.update_freq_post == 0 and (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
                     # update
-                    _, wt_bar = sess.run([QNet.sample_post, QNet.wt_bar],
-                                         feed_dict={QNet.context_state: state.reshape(-1, FLAGS.state_space),
-                                                    QNet.context_action: np.array(action).reshape(-1),
-                                                    QNet.context_reward: np.array(reward).reshape(-1),
-                                                    QNet.context_state_next: next_state.reshape(-1, FLAGS.state_space),
-                                                    QNet.context_done: np.array(done).reshape(-1,1),
-                                                    QNet.nprec: noise_precision, QNet.is_online: True})
+                    __ = sess.run([QNet.sample_post])
                     # -----------------------------------------------------------------------
 
                     if episode % FLAGS.save_frequency == 0:

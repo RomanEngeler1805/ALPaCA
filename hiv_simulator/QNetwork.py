@@ -139,7 +139,7 @@ class QNetwork():
         self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
 
         self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
-        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
+        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
 
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
@@ -148,19 +148,11 @@ class QNetwork():
         taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
         phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
 
-        wt_bar, Lt_inv = tf.cond(bsc > 0,
-                                 lambda: tf.cond(self.is_online,
-                                                 lambda: self._update_posterior_online(self.context_phi_next, self.context_phi_taken, self.context_reward),
-                                                 lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken, self.context_reward)),
-                                 lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
-
-        self.w_assign = tf.assign(self.wt_bar, wt_bar)
-        self.L_assign = tf.assign(self.Lt_inv, Lt_inv)
+        self.update_posterior = tf.map_fn(lambda x: self._update_posterior_online(*x),
+                                          elems=(self.context_phi_next, self.context_phi_taken, self.context_reward))
 
         self.sample_prior = self._sample_prior()
-
-        with tf.control_dependencies([self.w_assign, self.L_assign]):
-            self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
+        self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
         self.reset_post = self._reset_posterior()
 
@@ -200,7 +192,7 @@ class QNetwork():
         self.loss2 = logdet_Sigma
 
         # tf.losses.huber_loss(labels, predictions, delta=100.)
-        self.loss = self.loss0+ self.regularizer* self.loss_reg
+        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss_reg
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
@@ -280,8 +272,11 @@ class QNetwork():
 
 
     def _update_posterior_online(self, phi_next, phi_taken, reward):
+
+        (bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
+
         # max action
-        Q_next = tf.einsum('ijk,jl->ik', phi_next, self.wt_bar)
+        Q_next = tf.einsum('ia,il->a', phi_next, self.wt_bar)
         max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
         phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
         phi_hat = phi_taken - self.gamma * phi_max
@@ -296,13 +291,18 @@ class QNetwork():
         Lt_inv = self.Lt_inv - tf.einsum('b,bij->ij', denum, num)
 
         # mean
-        wt_unnorm = self.wt_unnorm + self.nprec * tf.reshape(tf.einsum('bi,b->i', phi_hat, reward), [-1, 1])  # XXXXXXXXXx
-        update_op = tf.assign(self.wt_unnorm, wt_unnorm)
+        wt_unnorm = self.wt_unnorm + self.nprec * tf.reshape(phi_hat,[-1,1])* reward # XXXXXXXXXx
 
-        with tf.control_dependencies([update_op]):
-            wt_bar = tf.matmul(Lt_inv, wt_unnorm)
+        # TODO: test this
+        update_op = tf.cond(bsc > 0,
+                            lambda: tf.group([tf.assign(self.wt_bar, tf.matmul(self.Lt_inv, self.wt_unnorm)),
+                                            tf.assign(self.Lt_inv, Lt_inv),
+                                            tf.assign(self.wt_unnorm, wt_unnorm)]),
+                            lambda: tf.group([tf.assign(self.wt_bar, self.w0_bar),
+                                            tf.assign(self.Lt_inv, tf.linalg.inv(self.L0)),
+                                            tf.assign(self.wt_unnorm, wt_unnorm)]))
 
-        return wt_bar, Lt_inv
+        return update_op
 
     def _max_posterior(self, phi_next, phi_taken, reward):
         ''' determine wt_bar for calculating phi(s_{t+1}, a*) '''
