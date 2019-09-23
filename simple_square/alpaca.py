@@ -12,6 +12,7 @@ from matplotlib.pyplot import cm
 import pandas as pd
 from matplotlib import ticker
 import sys
+import json
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.16)
@@ -21,11 +22,11 @@ tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("latent_space", 4, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 
-tf.flags.DEFINE_float("learning_rate", 3e-3, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("learning_rate", 5e-4, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.0001, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.2, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 10., "Noise precision (1/var)") # increase
@@ -34,15 +35,15 @@ tf.flags.DEFINE_integer("noise_Ndrop", 50, "Increase noise precision every N ste
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.20, "Initial split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 4, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_float("split_ratio", 0.9, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 4001, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 10, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
@@ -102,6 +103,76 @@ def plot_Valuefcn(Valuefcn, dValuefcn, target, save_path, states=np.array([])):
     plt.savefig(save_path)
     plt.close()
 
+def plot_Valuefcn_confidence(Valuefcn, dValuefcn, target, save_path, states=np.array([]), steps=7):
+    # normalize
+    # Valuefcn/= np.mean(Valuefcn, axis=1)[:, None]
+    # dValuefcn/= np.mean(Valuefcn, axis=1)[:, None]
+
+    #
+    fig, ax = plt.subplots(figsize=[8, 4], nrows=5)
+    for s in range(4):
+        ax[s].plot(np.arange(9), Valuefcn[s], c='b')
+        lower = Valuefcn[s]- 1.96* np.sqrt(dValuefcn[s])
+        upper = Valuefcn[s]+ 1.96* np.sqrt(dValuefcn[s])
+        ax[s].fill_between(np.arange(9), lower, upper, alpha=0.5)
+        ax[s].plot([target, target], [np.min(lower), np.max(upper)], c='r')
+        pos = np.argmax(states[s])
+        ax[s].plot([pos, pos], [np.min(lower), np.max(upper)], c='b')  # imshow makes y-axis pointing downwards
+
+        ax[s].set_xticks([])
+        #ax[s].set_ylim([0.7* np.min(Valuefcn[s]), 1.3* np.max(Valuefcn[s])])
+        #ax[s].set_yticks([])
+
+    ax[4].plot(np.arange(9), Valuefcn[7], c='b')
+    lower = Valuefcn[7] - 1.96 * np.sqrt(dValuefcn[7])
+    upper = Valuefcn[7] + 1.96 * np.sqrt(dValuefcn[7])
+    ax[4].fill_between(np.arange(9), lower, upper, alpha=0.5)
+    ax[4].plot([target, target], [np.min(lower), np.max(upper)], c='r')
+    pos = np.argmax(states[7])
+    ax[4].plot([pos, pos], [np.min(lower), np.max(upper)], c='b')  # imshow makes y-axis pointing downwards
+
+    ax[4].set_xticks([])
+    #ax[4].set_ylim([0.7 * np.min(Valuefcn[7]), 1.3 * np.max(Valuefcn[7])])
+    # ax[s].set_yticks([])
+
+    plt.savefig(save_path)
+    plt.close()
+
+def plot_Value_Paper(Valuefcn, target, save_path, states=np.array([]), steps=7):
+    #
+    fig, ax = plt.subplots(figsize=[8, 6], nrows=5)
+    for s in range(4):
+        c_low = np.floor(np.min(Valuefcn[s]))
+        c_up = np.ceil(np.max(Valuefcn[s]))
+        im = ax[s].imshow(Valuefcn[s].reshape(1,-1))
+        ax[s].plot(target, 0, 'ro', markersize=20)
+        pos = np.argmax(states[s])
+        ax[s].plot(pos, 0., 'bo', markersize=20)  # imshow makes y-axis pointing downwards
+        ax[s].set_xticks([])
+        ax[s].set_yticks([])
+        im.set_clim(np.min(Valuefcn[s]), np.max(Valuefcn[s]))
+        cb = fig.colorbar(im, ax=ax[s], shrink=0.55, orientation="vertical", pad=0.1, aspect=1, format='%.0f')
+        cb.set_ticks([c_low+1, c_up-1])
+
+    c_low = np.floor(1.1 * np.min(Valuefcn[7]))
+    c_up = np.ceil(0.9 * np.max(Valuefcn[7]))
+    im = ax[4].imshow(Valuefcn[7].reshape(1, -1), vmin=c_low, vmax=c_up)
+    ax[4].plot(target, 0, 'ro', markersize=20)
+    pos = np.argmax(states[7])
+    ax[4].plot(pos, 0., 'bo', markersize=20)  # imshow makes y-axis pointing downwards
+    ax[4].set_xticks([])
+    ax[4].set_yticks([])
+    im.set_clim(np.min(Valuefcn[7]), np.max(Valuefcn[7]))
+
+    fig.subplots_adjust(right=0.8)
+    cb = fig.colorbar(im, ax=ax[4], shrink=0.55, orientation="vertical", pad=0.1, aspect=1, format='%.0f')
+    cb.set_ticks([c_low+1, c_up-1])
+
+    plt.tight_layout()
+
+    plt.savefig(save_path+'_'+str(np.int(np.min(Valuefcn)))+ '_'+ str(np.int(np.max(Valuefcn))))
+    plt.close()
+
 
 
 
@@ -155,6 +226,10 @@ if not os.path.exists(basis_fcn_dir):
 reward_dir = './figures/'+ time.strftime('%H-%M-%d_%m-%y')+ '/'
 if not os.path.exists(reward_dir):
     os.makedirs(reward_dir)
+
+data_dir = './data/'+ time.strftime('%H-%M-%d_%m-%y')+ '/'
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir)
 
 # initialize replay memory and model
 fullbuffer = replay_buffer(FLAGS.replay_memory_size) # large buffer to store all experience
@@ -224,6 +299,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # loop steps
             step = 0
 
+            Value_plot = np.zeros([FLAGS.L_episode, FLAGS.state_space])
+            dValue_plot = np.zeros([FLAGS.L_episode, FLAGS.state_space])
+
             while step < FLAGS.L_episode:
                 # take a step
                 Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})
@@ -238,40 +316,20 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 # actual reward
                 rw.append(reward)
 
-                # State Value Fcn -----------------------------------------------------------
-                if (step == 0 or step == FLAGS.L_episode-1 ) and n == 0 and episode % FLAGS.save_frequency == 0:
-                    state_train = np.zeros([step + 1, FLAGS.state_space])
+                # State Value Fcn ----------------------------------------------------------- XXXXXXXX RE
+                if n == 0 and episode % FLAGS.save_frequency == 0:
+                    if step == 0:
+                        state_plot = np.eye(9)
+                        wt_bar, L0, phi_plot = sess.run([QNet.w0_bar, QNet.L0, QNet.phi],
+                                                        feed_dict={QNet.state: state_plot, QNet.nprec: noise_precision})
+                        Lt_inv = np.linalg.inv(L0)
+                    # value function
+                    Qout = np.einsum('i,bia->ba', wt_bar.reshape(-1), phi_plot)
+                    dQout = np.einsum('bia,ij,bja->ba',phi_plot, Lt_inv, phi_plot)
+                    Qout_max = np.argmax(Qout, axis=1)
+                    Value_plot[step, :] = np.max(Qout, axis=1)
+                    dValue_plot[step, :] = dQout[np.arange(len(Qout_max)), Qout_max]
 
-                    # fill array
-                    for k, experience in enumerate(tempbuffer.buffer):
-                        state_train[k] = experience[0]
-
-                    tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
-                    # state value
-                    V_TS = np.zeros([FLAGS.state_space, 3])
-                    dV_TS = np.zeros([FLAGS.state_space, 3])
-                    for i in range(FLAGS.state_space):
-                        ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
-                        ss[i] = 1
-                        w0_bar, L0, Sigma_e, phi = sess.run([QNet.w0_bar, QNet.L0, QNet.Sigma_e, QNet.phi],
-                                                            feed_dict={QNet.state: ss.reshape(1, -1),
-                                                                       QNet.nprec: noise_precision})
-
-                        try:
-                            Qout = np.dot(np.transpose(wt_bar), phi[0])
-                            dQout = np.einsum('ia,ij,ja->a', phi[0], Lt_inv, phi[0])
-                        except:
-                            Qout = np.dot(np.transpose(w0_bar), phi[0])
-                            dQout = np.einsum('ia,ij,ja->a', phi[0], np.linalg.inv(L0), phi[0])
-
-                        #
-                        #arg_Qmax = np.argmax(Qout, axis=1)
-
-                        V_TS[i] = Qout#[0,arg_Qmax]
-                        dV_TS[i] = dQout#[arg_Qmax]
-
-                    # plotting
-                    plot_Valuefcn(V_TS, dV_TS, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step), state_train)
                 # -----------------------------------------------------------------------
 
                 # update posterior
@@ -298,33 +356,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                    QNet.context_done: done_train,
                                    QNet.nprec: noise_precision, QNet.is_online: True})
 
-                    # State Value Fcn -----------------------------------------------------------
-                    if (episode) % FLAGS.save_frequency == 0 and n == 0:
-                        state_train = np.append(state_train, next_state.reshape(1, -1), axis=0)
-                        tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
-                        # state value
-                        V_TS = np.zeros([FLAGS.state_space,3])
-                        dV_TS = np.zeros([FLAGS.state_space,3])
-                        for i in range(FLAGS.state_space):
-                            ss = np.zeros([FLAGS.state_space])  # loop over one-hot encoding
-                            ss[i] = 1
-                            # i/5 downwards, i%5 rightwards
-                            # if i / 5 == tar[0] and i % 5 == tar[1]:  # add reward at target location
-                            #    ss[FLAGS.state_space - 1] = 1.
-                            Sigma_e, phi = sess.run([QNet.Sigma_e, QNet.phi],
-                                                    feed_dict={QNet.state: ss.reshape(1, -1),
-                                                               QNet.nprec: noise_precision})
-                            Qout = np.dot(np.transpose(wt_bar), phi[0])
-                            dQout = np.einsum('ia,ij,ja->a', phi[0], Lt_inv, phi[0])
-
-                            arg_Qmax = np.argmax(Qout, axis=1)
-
-                            V_TS[i] = Qout#[0,arg_Qmax]
-                            dV_TS[i] = dQout#[arg_Qmax]
-
-                        # plotting
-                        plot_Valuefcn(V_TS, dV_TS, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step+1), state_train)
-
                     # -----------------------------------------------------------------------
 
                 # update state, and counters
@@ -333,7 +364,22 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 step += 1
 
                 # -----------------------------------------------------------------------
-            del wt_bar, Lt_inv
+
+            # plot value fcn
+            if n == 0 and episode % FLAGS.save_frequency == 0:
+                state_train = np.zeros([step + 1, FLAGS.state_space])
+                # fill array
+                for k, experience in enumerate(tempbuffer.buffer):
+                    state_train[k] = experience[0]
+                tar = env.target  # target location as in array notation i.e. tar[0] downwards, tar[1] rightwards
+                # plotting
+                plot_Value_Paper(Value_plot, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step), state_train)
+
+                data_name = data_dir+ 'episode_'+ str(episode)
+                np.savez(data_name, Value_plot, state_train, tar)
+
+
+                plot_Valuefcn_confidence(Value_plot, dValue_plot, tar, V_M_dir + 'Epoch_' + str(episode) + '_Step_' + str(step), state_train)
 
             # append episode buffer to large buffer
             fullbuffer.add(tempbuffer.buffer)
@@ -478,7 +524,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # ===============================================================
             # evaluation
-            N_eval = 50
+            if episode == 3000:
+                N_eval = 10000
+            else:
+                N_eval = 1000
 
             reward_eval = np.zeros([N_eval])
 
@@ -533,9 +582,24 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     global_index += 1
                     step += 1
 
-            reward_eval = tf.Summary(value=[tf.Summary.Value(tag='Reward Eval', simple_value=np.sum(reward_eval)/ N_eval)])
-            summary_writer.add_summary(reward_eval, episode)
+            rew_env = np.linspace(0, 10, 9)
+            rew_opt = 1./2.* (np.sum(rew_env[3:])+ np.sum(rew_env[5:])+ 10* 10.)
+
+            regret_eval_summary = tf.Summary(value=[tf.Summary.Value(tag='Regret Eval', simple_value=np.sum(reward_eval)/ N_eval/ rew_opt)])
+            reward_eval_summary = tf.Summary(value=[tf.Summary.Value(tag='Reward Eval', simple_value=np.sum(reward_eval)/ N_eval)])
+            summary_writer.add_summary(regret_eval_summary, episode)
+            summary_writer.add_summary(reward_eval_summary, episode)
             summary_writer.flush()
+
+            if episode == 3000:
+                # write regret to file
+                regret = np.sum(reward_eval.reshape(100, 100), axis=1)/ 100/ rew_opt
+                regr = np.mean(regret)
+                dregr = np.std(regret)/ 100
+                file = open(saver_dir+ 'regret', 'a')
+                file.write('Normalized Reward: \n')
+                file.write('{:1.2f} +- {:1.4f}\n'.format(regr, dregr))
+                file.close()
 
     # write reward to file
     df = pd.DataFrame(reward_episode)
