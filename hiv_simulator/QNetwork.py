@@ -148,51 +148,57 @@ class QNetwork():
         taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
         phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
 
-        _, _, _, _, wt_bar, Lt_inv = tf.cond(bsc > 0,
-                lambda: tf.scan(self._update_posterior_online,
-                    elems=(self.context_phi_next, self.context_phi_taken, self.context_reward, tf.reshape(self.wt_unnorm, [1, self.latent_dim, 1]),
-                           tf.reshape(self.wt_bar, [1, self.latent_dim, 1]), tf.reshape(self.Lt_inv, [1, self.latent_dim, self.latent_dim]))),
-                lambda: (tf.constant(0.), tf.constant(0.), tf.constant(0.), tf.reshape(self.wt_unnorm, [1, self.latent_dim, 1]),
-                         tf.reshape(self.w0_bar, [-1,self.latent_dim,1]), tf.reshape(tf.linalg.inv(self.L0), [1, self.latent_dim, self.latent_dim])))
+        # META TRAINING (no gradients through here)
+        _, _, _, wt_unnorm_online, wt_bar_online, Lt_inv_online = tf.scan(self._update_posterior_online,
+                 elems=(self.context_phi_next,
+                        self.context_phi_taken,
+                        self.context_reward,
+                        tf.reshape(self.wt_unnorm, [1, self.latent_dim, 1]),
+                        tf.reshape(self.wt_bar, [1, self.latent_dim, 1]),
+                        tf.reshape(self.Lt_inv, [1, self.latent_dim, self.latent_dim])))
 
-        wt_bar = tf.reshape(wt_bar, [-1,self.latent_dim,1])
-        wt_barn = wt_bar[-1]
-        Lt_invn = Lt_inv[-1]
-
+        self.reset_post = self._reset_posterior()
         self.sample_prior = self._sample_prior()
         self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
-        self.w_assign = tf.assign(self.wt_bar, wt_barn)
-        self.L_assign = tf.assign(self.Lt_inv, Lt_invn)
 
-        self.reset_post = self._reset_posterior()
+        w_assign = tf.assign(self.wt_bar, wt_bar_online[-1])
+        L_assign = tf.assign(self.Lt_inv, Lt_inv_online[-1])
+        w_unnorm = tf.assign(self.wt_unnorm, wt_unnorm_online[-1])
+
+        self.update_posterior = tf.group([w_assign, L_assign, w_unnorm])
+
+        # META TESTING (gradients through here)
+        _, _, _, _, wt_bar, Lt_inv = tf.scan(self._update_posterior_online,
+                elems=(self.context_phi_next,
+                       self.context_phi_taken,
+                       self.context_reward,
+                       tf.reshape(self.wt_unnorm, [1, self.latent_dim, 1]),
+                       tf.reshape(self.w0_bar, [1, self.latent_dim, 1]),
+                       tf.reshape(tf.linalg.inv(self.L0), [1, self.latent_dim, self.latent_dim])))
 
         # loss function ==================================================================
         # current state -------------------------------------
-        self.Q = tf.einsum('im,bi->b', wt_barn, phi_taken, name='Q')
+        self.Q = tf.einsum('im,bi->b', wt_bar[-1], phi_taken, name='Q')
 
         # next state ----------------------------------------
-        Qnext = tf.einsum('jm,bjk->bk', wt_barn, self.phi_next, name='Qnext')
+        Qnext = tf.einsum('jm,bjk->bk', wt_bar[-1], self.phi_next, name='Qnext')
         self.max_action = tf.one_hot(tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
 
         self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
         self.phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
-
         self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='Qmax_target')
 
-        self.Qmax_target = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
-
+        self.Qmax_target = tf.einsum('im,bi->b', wt_bar[-1], self.phi_max_target)
         self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_target)
 
         # Q(s',a*)+ r- Q(s,a)
         self.Qdiff = self.Qtarget - self.Q
 
         # predictive covariance
-
         self.phi_hat = phi_taken - self.gamma * self.phi_max_target
 
-        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, Lt_invn, self.phi_hat,
-                               name='Sigma_pred') + self.Sigma_e  # column vector
+        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, Lt_inv[-1], self.phi_hat, name='Sigma_pred') + self.Sigma_e
         logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred))
 
         # loss
@@ -281,28 +287,28 @@ class QNetwork():
 
         return wt_bar, Lt_inv
 
+    def _update_posterior_online(self, old_values, update_values):
 
-    def _update_posterior_online(self, old_values, new_values):
-
-        (phi_next, phi_taken, reward, wt_unnorm, wt_bar, Lt_inv) = old_values
+        (_, _, _, wt_unnorm_old, wt_bar_old, Lt_inv_old) = old_values
+        (phi_next, phi_taken, reward, _, _, _) = update_values
 
         # max action
-        Q_next = tf.einsum('ia,ik->a', phi_next, wt_bar)
+        Q_next = tf.einsum('ia,ik->a', phi_next, wt_bar_old)
         max_action = tf.one_hot(tf.argmax(Q_next), self.action_dim, dtype=tf.float32)
         phi_max = tf.einsum('ia,a->i', phi_next, max_action)
         phi_hat = phi_taken - self.gamma * phi_max
 
         # variance
-        denum = 1. / self.nprec + tf.einsum('i,ij,j->', phi_hat, Lt_inv, phi_hat)
+        denum = 1. / self.nprec + tf.einsum('i,ij,j->', phi_hat, Lt_inv_old, phi_hat)
         denum = tf.reciprocal(denum)
 
-        num = tf.einsum('ij,j->i', Lt_inv, phi_hat)
+        num = tf.einsum('ij,j->i', Lt_inv_old, phi_hat)
         num = tf.einsum('i,j->ij', num, num)
 
-        Lt_inv = Lt_inv - tf.einsum(',ij->ij', denum, num)
+        Lt_inv = Lt_inv_old - tf.multiply(num, denum)
 
         # mean
-        wt_unnorm = wt_unnorm + self.nprec * tf.reshape(phi_hat,[-1,1])* reward   # XXXXXXXXXx
+        wt_unnorm = wt_unnorm_old + tf.multiply(self.nprec* reward, tf.reshape(phi_hat, [-1, 1]))
         wt_bar = tf.matmul(Lt_inv, wt_unnorm)
 
         return (phi_next, phi_taken, reward, wt_unnorm, wt_bar, Lt_inv)
