@@ -263,13 +263,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         next_state_train[k] = experience[3]
                         done_train[k] = experience[4]
 
-                    # update
+                    # update (we only need to feed values since last update)
                     _ = sess.run([QNet.update_posterior],
-                                feed_dict={QNet.context_state: state_train,
-                                           QNet.context_action: action_train,
-                                           QNet.context_reward: reward_train,
-                                           QNet.context_state_next: next_state_train,
-                                           QNet.context_done: done_train,
+                                feed_dict={QNet.context_state: state_train[-FLAGS.update_freq_post:],
+                                           QNet.context_action: action_train[-FLAGS.update_freq_post:],
+                                           QNet.context_reward: reward_train[-FLAGS.update_freq_post:],
+                                           QNet.context_state_next: next_state_train[-FLAGS.update_freq_post:],
+                                           QNet.context_done: done_train[-FLAGS.update_freq_post:],
                                            QNet.nprec: noise_precision, QNet.is_online: True})
 
                     sess.run(QNet.sample_post)
@@ -389,6 +389,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             next_state_valid = next_state_sample[valid, :]
             done_valid = done_sample[valid]
 
+            # TODO: this part is very inefficient due to many session calls and processing data multiple times
             # select amax from online network
             amax_online = sess.run(QNet.max_action,
                                    feed_dict={QNet.context_state: state_train.reshape(-1, FLAGS.state_space),

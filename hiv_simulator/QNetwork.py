@@ -149,6 +149,7 @@ class QNetwork():
         phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
 
         # META TRAINING (no gradients through here)
+        # TODO: requires at least a batchsize of 2
         _, _, _, wt_unnorm_online, wt_bar_online, Lt_inv_online = tf.scan(self._update_posterior_online,
                  elems=(self.context_phi_next,
                         self.context_phi_taken,
@@ -161,7 +162,6 @@ class QNetwork():
         self.sample_prior = self._sample_prior()
         self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
-
         w_assign = tf.assign(self.wt_bar, wt_bar_online[-1])
         L_assign = tf.assign(self.Lt_inv, Lt_inv_online[-1])
         w_unnorm = tf.assign(self.wt_unnorm, wt_unnorm_online[-1])
@@ -173,7 +173,7 @@ class QNetwork():
                 elems=(self.context_phi_next,
                        self.context_phi_taken,
                        self.context_reward,
-                       tf.reshape(self.wt_unnorm, [1, self.latent_dim, 1]),
+                       tf.reshape(tf.matmul(self.L0, self.w0_bar), [1, self.latent_dim, 1]),
                        tf.reshape(self.w0_bar, [1, self.latent_dim, 1]),
                        tf.reshape(tf.linalg.inv(self.L0), [1, self.latent_dim, self.latent_dim])))
 
