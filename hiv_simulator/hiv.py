@@ -69,7 +69,6 @@ class HIVTreatment(object):
         self.num_actions = 4
         self.perturb_params = ('p_lambda1','p_lambda2','p_k1','p_k2','p_f', \
             'p_m1','p_m2','p_lambdaE','p_bE','p_Kb','p_d_E','p_Kd')
-        self.param_set = [np.random.normal(scale=0.1) for i in range(12)]
         self.reset(perturb_state, p_T1, p_T2, p_T1s, p_T2s, p_V, p_E, **kw)
 
     def reset(self, perturb_state=False, p_T1=0., p_T2=0., p_T1s=0., p_T2s=0., p_V=0., p_E=0., **kw):
@@ -84,7 +83,7 @@ class HIVTreatment(object):
             self.state = baseline_state + (baseline_state * np.array([p_T1, p_T2, p_T1s, p_T2s, p_V, p_E])) # could scale the random perturbations to reduce their effect by multiplyting by d < 1
 
         # RE: perturb hidden state
-        self.param_set = {key: value for (key, value) in zip(self.perturb_params, np.random.normal(scale=0.1, size=12))}
+        self.param_set = {key: value for (key, value) in zip(self.perturb_params, np.zeros(12))}#np.random.normal(scale=0.1, size=12))}
 
 
     def observe(self):
