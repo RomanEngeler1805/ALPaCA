@@ -33,7 +33,7 @@ class QNetwork():
 
     def model(self, x, a):
         ''' Embedding into latent space '''
-        with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
+        with tf.variable_scope("encoding", reuse=tf.AUTO_REUSE):
             # model architecture
             self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
@@ -129,6 +129,7 @@ class QNetwork():
         self.Sigma_e = 1. / self.nprec * tf.ones(bs, name='noise_precision')
 
         # output layer (Bayesian) =========================================================
+        with tf.variable_scope("last_layer", reuse=tf.AUTO_REUSE):
         # prior (updated via GD) ---------------------------------------------------------
         self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
         self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
@@ -140,7 +141,7 @@ class QNetwork():
         self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
 
         self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
-        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
+        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
 
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
@@ -192,12 +193,12 @@ class QNetwork():
         # loss
         self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
         self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
-        self.loss_reg = tf.losses.get_regularization_loss()
+        self.loss_reg = tf.losses.get_regularization_loss(scope=self.scope)
 
         self.loss2 = logdet_Sigma
 
         # tf.losses.huber_loss(labels, predictions, delta=100.)
-        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss_reg
+        self.loss = self.loss0+ self.regularizer* self.loss_reg
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
@@ -248,10 +249,12 @@ class QNetwork():
         update_op = tf.assign(self.wt, self._sample_MN(self.w0_bar, tf.matrix_inverse(self.L0)))
         return update_op
 
+
     def _sample_posterior(self, wt_bar, Lt_inv):
         ''' sample wt from posterior '''
         update_op = tf.assign(self.wt, self._sample_MN(wt_bar, Lt_inv))
         return update_op
+
 
     def _sample_MN(self, mu, cov):
         ''' sample from multi-variate normal '''
@@ -261,19 +264,6 @@ class QNetwork():
         #x = mu + tf.matmul(A, z)
         x = mu+ tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
         return x
-
-    def _update_posterior(self, phi_hat, reward):
-        ''' update posterior distribution '''
-        # I've done that differently than outlined in the write-up
-        # since I don't like to put the noise variance inside the prior
-        Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context)) # noise precision
-        Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0
-        Lt_inv = tf.linalg.inv(Lt) # posterior variance
-        wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
-                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
-        wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean
-
-        return wt_bar, Lt_inv
 
 
     def _update_posterior_online(self, phi_next, phi_taken, reward):
@@ -300,6 +290,21 @@ class QNetwork():
             wt_bar = tf.matmul(Lt_inv, wt_unnorm)
 
         return wt_bar, Lt_inv
+
+
+    def _update_posterior(self, phi_hat, reward):
+        ''' update posterior distribution '''
+        # I've done that differently than outlined in the write-up
+        # since I don't like to put the noise variance inside the prior
+        Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context)) # noise precision
+        Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0
+        Lt_inv = tf.linalg.inv(Lt) # posterior variance
+        wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
+                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
+        wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean
+
+        return wt_bar, Lt_inv
+
 
     def _max_posterior(self, phi_next, phi_taken, reward):
         ''' determine wt_bar for calculating phi(s_{t+1}, a*) '''
@@ -330,6 +335,7 @@ class QNetwork():
 
         return wt_bar, Lt_inv
 
+
     def _reset_posterior(self):
         update_op0 = tf.assign(self.wt_bar, self.w0_bar)
         update_op1 = tf.assign(self.Lt_inv, tf.linalg.inv(self.L0))
@@ -338,6 +344,7 @@ class QNetwork():
         update_op = tf.group([update_op0, update_op1, update_op2])
 
         return update_op
+
 
     def copy_params(self):
         # copy parameters
