@@ -66,7 +66,7 @@ tf.set_random_seed(FLAGS.random_seed)
 
 from hiv import HIVTreatment
 from QNetwork import QNetwork
-from generate_plots import generate_plots
+from generate_plots import generate_plots, evaluation_plots, value_function_plot
 from update_model import update_model
 
 sys.path.insert(0, './..')
@@ -130,6 +130,9 @@ Q_Sum_r_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Q_Sum_r/'
 create_dictionary(Q_Sum_r_dir)
 V_E_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Marker_V_E/'
 create_dictionary(V_E_dir)
+Qprior = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Qprior/'
+create_dictionary(Qprior)
+
 
 # initialize replay memory and model
 fullbuffer = replay_buffer(FLAGS.replay_memory_size)  # large buffer to store all experience
@@ -231,7 +234,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 # update state, and counters
                 state = next_state.copy()
                 step += 1
-                # -----------------------------------------------------------------------
+
+
+                    # -----------------------------------------------------------------------
 
                 # -----------------------------------------------------------------------
             if flag:
@@ -240,15 +245,16 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         time_env.append(time.time() - start)
 
-        # tensorflow summaries
-        reward_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Episodic Reward',
-                                    simple_value=np.sum(np.array(rw)) * FLAGS.rew_norm / FLAGS.N_tasks)])
-        learning_rate_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
-        summary_writer.add_summary(reward_summary, episode)
-        summary_writer.add_summary(learning_rate_summary, episode)
-        summary_writer.flush()
+        if episode % 10 == 0:
+            # tensorflow summaries
+            reward_summary = tf.Summary(
+                value=[tf.Summary.Value(tag='Episodic Reward',
+                                        simple_value=np.sum(np.array(rw)) * FLAGS.rew_norm / FLAGS.N_tasks)])
+            learning_rate_summary = tf.Summary(
+                value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
+            summary_writer.add_summary(reward_summary, episode)
+            summary_writer.add_summary(learning_rate_summary, episode)
+            summary_writer.flush()
 
         # reward in episode
         reward_episode.append(np.sum(np.array(rw)) / FLAGS.N_tasks)
@@ -264,7 +270,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # ==================================================================================
         start = time.time()
 
-        for n_grad_steps in range(1):
+        for n_grad_steps in range(4):
             update_model(sess,
                          QNet,
                          Qtarget,
@@ -280,7 +286,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         time_sgd.append(time.time()- start)
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-        if episode < 4:
+        if episode < 2:
             batch_size *= 2
 
         # learning rate schedule
@@ -317,118 +323,14 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
             print('AVG time env: '+ str(np.mean(np.asarray(time_env))))
-            print('AVG time env: ' + str(np.mean(np.asarray(time_sgd))))
+            print('AVG time sgd: ' + str(np.mean(np.asarray(time_sgd))))
 
             print('Reward in Episode ' + str(episode) + ':   ' + str(np.sum(rw)))
             print('Learning_rate: ' + str(np.round(learning_rate, 5)) + ', Nprec: ' + str(
                 noise_precision) + ', Split ratio: ' + str(np.round(split_ratio, 2)))
 
-            # ==================================================== #
-            # log history of Q values, history of discounted rewards -> Qlog, Rlog
-            # log V, E markers -> Vlog, Elog
-            # log reward -> Rlog
-            # ==================================================== #
-            Neval = 3 # number of repeat
-
-            # evaluation ------------------------------------------------
-            with open('./'+'hiv'+'_preset_hidden_params','r') as f:
-                preset_parameters = pickle.load(f)
-
-            for i_eval in range(6):
-
-                # logging
-                Qlog = np.zeros([Neval, FLAGS.L_episode])
-                Rlog = np.zeros([Neval, FLAGS.L_episode])
-                Vlog = np.zeros([Neval, FLAGS.L_episode])
-                Elog = np.zeros([Neval, FLAGS.L_episode])
-
-                # load hidden parameters for evaluation
-                preset_hidden_params = preset_parameters[i_eval]
-
-                for ne in range(Neval):
-
-                    # reset buffer
-                    tempbuffer.reset()
-                    # reset environment
-                    env.reset()
-                    env.param_set = preset_hidden_params
-                    state = env.observe()
-
-                    # sample w from prior
-                    sess.run([QNet.reset_post])
-                    sess.run([QNet.sample_prior])
-
-                    # loop steps
-                    step = 0
-
-                    while step < FLAGS.L_episode:
-
-                        # take a step
-                        Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1, FLAGS.state_space)})
-                        action = eGreedyAction(Qval, eps)
-                        next_state, reward, done = env.step(action, perturb_params=True)
-
-                        # store experience in memory
-                        new_experience = [state, action, reward, next_state, done]
-                        tempbuffer.add(new_experience)
-
-                        # logging
-                        Qlog[ne, step] = np.max(Qval)
-                        Rlog[ne, step] = reward
-                        Vlog[ne, step] = state[4]
-                        Elog[ne, step] = state[5]
-
-                        if done == 1:
-                            break
-
-                        _, _ = sess.run([QNet.w_assign, QNet.L_assign],
-                                        feed_dict={QNet.context_state: state.reshape(-1, FLAGS.state_space),
-                                                   QNet.context_action: np.array(action).reshape(-1),
-                                                   QNet.context_reward: np.array(reward).reshape(-1),
-                                                   QNet.context_state_next: next_state.reshape(-1, FLAGS.state_space),
-                                                   QNet.context_done: np.array(done).reshape(-1, 1),
-                                                   QNet.nprec: noise_precision, QNet.is_online: True})
-
-                        # update posterior iteratively
-                        if (step + 1) % FLAGS.update_freq_post == 0 and (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
-                            # update
-                            __ = sess.run([QNet.sample_post])
-
-                        # update state, and counters
-                        state = next_state.copy()
-                        step += 1
-
-                    # -----------------------------------------------------------------------
-
-                reward_tensorboard = np.mean(np.sum(Rlog, axis=1))* FLAGS.rew_norm
-
-                # log to tensorboard
-                reward_eval_summary = tf.Summary(value=[tf.Summary.Value(tag='Reward Eval '+str(i_eval), simple_value=reward_tensorboard)])
-                summary_writer.add_summary(reward_eval_summary, episode)
-                summary_writer.flush()
-
-                # plot for visual inspection
-                discounted_r = np.zeros_like(Rlog[0], dtype=np.float32)
-                running_add = 0
-                for t in reversed(range(len(Rlog[0]))):
-                    running_add = running_add * FLAGS.gamma + Rlog[0,t]
-                    discounted_r[t] = running_add
-
-                plt.figure()
-                plt.scatter(discounted_r, Qlog[0])
-                plt.xlabel('summed discounted reward')
-                plt.ylabel('Q value')
-                plt.savefig(Q_Sum_r_dir+ 'Episode_'+ str(episode)+'_case_'+ str(i_eval))
-                plt.close()
-
-                plt.figure()
-                plt.scatter(Vlog[0], Elog[0])
-                plt.xlabel('V')
-                plt.ylabel('E')
-                plt.xlim([-1, 10])
-                plt.ylim([-1, 10])
-                plt.savefig(V_E_dir + 'Episode_' + str(episode)+'_case_'+ str(i_eval))
-                plt.close()
+            evaluation_plots(sess, QNet, env, tempbuffer, FLAGS, summary_writer, noise_precision, episode, split_ratio, base_dir)
+            value_function_plot(sess, QNet, tempbuffer, FLAGS, episode, base_dir)
 
 
     # write reward to file

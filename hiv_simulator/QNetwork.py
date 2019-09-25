@@ -129,19 +129,23 @@ class QNetwork():
         self.Sigma_e = 1. / self.nprec * tf.ones(bs, name='noise_precision')
 
         # output layer (Bayesian) =========================================================
-        with tf.variable_scope("last_layer", reuse=tf.AUTO_REUSE):
         # prior (updated via GD) ---------------------------------------------------------
-        self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
-        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
-        L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
-        self.L0 = tf.exp(L0_asym)#tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
+        with tf.variable_scope("last_layer", reuse=tf.AUTO_REUSE):
+            self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
+            self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
+            L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
+            self.L0 = tf.exp(L0_asym)#tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
-        self.wt_bar = tf.get_variable('wt_bar', initializer=self.w0_bar, trainable=False)
-        self.Lt_inv = tf.get_variable('Lt_inv', initializer=tf.linalg.inv(self.L0), trainable=False)
-        self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
+            self.wt_bar = tf.get_variable('wt_bar', initializer=self.w0_bar, trainable=False)
+            self.Lt_inv = tf.get_variable('Lt_inv', initializer=tf.linalg.inv(self.L0), trainable=False)
+            self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
 
-        self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
+            self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
+
+
+
         self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
+        self.Q0 = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
 
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
