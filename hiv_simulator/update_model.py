@@ -126,18 +126,26 @@ def update_model(sess,
 
     # reduce summary size
     if episode % 10 == 0:
+        # volume of cube encompassing trajectory
+        state_coverage = np.max(state_sample, axis=0)- np.min(state_sample, axis=0)
+        volume_coverage = np.prod(state_coverage)
+
         # update summary
         _, summaries_gradvar = sess.run([QNet.updateModel, QNet.summaries_gradvar], feed_dict=feed_dict)
 
-        loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss', simple_value=(lossBuffer / batch_size))])
-        loss1_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss1', simple_value=(loss1Buffer / batch_size))])
-        loss2_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss2', simple_value=(loss2Buffer / batch_size))])
+        loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/Loss', simple_value=(lossBuffer / batch_size))])
+        loss1_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/Loss1', simple_value=(loss1Buffer / batch_size))])
+        loss2_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/Loss2', simple_value=(loss2Buffer / batch_size))])
         lossreg_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Loss reg', simple_value=(lossregBuffer / batch_size))])
+            value=[tf.Summary.Value(tag='Performance/Loss reg', simple_value=(lossregBuffer / batch_size))])
+
+        coverage_summary = tf.Summary(
+            value=[tf.Summary.Value(tag='Exploration/State Coverage', simple_value=volume_coverage)])
 
         summary_writer.add_summary(loss_summary, episode)
         summary_writer.add_summary(loss1_summary, episode)
         summary_writer.add_summary(loss2_summary, episode)
+        summary_writer.add_summary(lossreg_summary, episode)
         summary_writer.add_summary(lossreg_summary, episode)
         summary_writer.add_summary(summaries_gradvar, episode)
 

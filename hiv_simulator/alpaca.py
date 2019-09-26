@@ -36,21 +36,21 @@ tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.0, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.4, "Maximum split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
-tf.flags.DEFINE_integer("N_episodes", 4000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
-tf.flags.DEFINE_float("rew_norm", 1e4, "Normalization factor for reward") # X
+tf.flags.DEFINE_float("rew_norm", 1e5, "Normalization factor for reward") # X
 
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 1e-3, "Regularization parameter") # X
 tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
 
@@ -66,7 +66,7 @@ tf.set_random_seed(FLAGS.random_seed)
 
 from hiv import HIVTreatment
 from QNetwork import QNetwork
-from generate_plots import generate_plots, evaluation_plots, value_function_plot
+from generate_plots import generate_plots, evaluation_plots, value_function_plot, generate_posterior_plots
 from update_model import update_model
 
 sys.path.insert(0, './..')
@@ -85,10 +85,14 @@ def create_dictionary(dir_name):
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
 
+def hidden_idx(episode):
+    idx_candidate = np.array([1, 2, 3, 5])
+    return idx_candidate[episode% len(idx_candidate)]
+
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.9
+eps = 0.1
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -118,21 +122,22 @@ create_dictionary(saver_dir)
 
 # folder for plotting --------------------------------------------------------------------
 base_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y')
-reward_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Reward_Histogram/'
+reward_dir = base_dir + '/Reward_Histogram/'
 create_dictionary(reward_dir)
-trajectory_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Trajectories/'
+trajectory_dir = base_dir + '/Trajectories/'
 create_dictionary(trajectory_dir)
-histogram_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Action_Histogram/'
+histogram_dir = base_dir + '/Action_Histogram/'
 create_dictionary(histogram_dir)
-states_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/State_Histogram/'
+states_dir = base_dir + '/State_Histogram/'
 create_dictionary(states_dir)
-Q_Sum_r_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Q_Sum_r/'
+Q_Sum_r_dir = base_dir + '/Q_Sum_r/'
 create_dictionary(Q_Sum_r_dir)
-V_E_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Marker_V_E/'
+V_E_dir = base_dir + '/Marker_V_E/'
 create_dictionary(V_E_dir)
-Qprior = './figures/' + time.strftime('%H-%M-%d_%m-%y') + '/Qprior/'
+Qprior = base_dir + '/Qprior/'
 create_dictionary(Qprior)
-
+Qposterior_dir = base_dir + '/Qposterior/'
+create_dictionary(Qposterior_dir)
 
 # initialize replay memory and model
 fullbuffer = replay_buffer(FLAGS.replay_memory_size)  # large buffer to store all experience
@@ -184,6 +189,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         # count reward
         rw = []
+        action_task = []
+        kl_episode = []
 
         start = time.time()
 
@@ -194,7 +201,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # reset environment
             env.reset()
-            preset_hidden_params = preset_parameters[episode%6]
+            preset_hidden_params = preset_parameters[hidden_idx(episode)]
             env.param_set = preset_hidden_params
             state = env.observe()
 
@@ -230,11 +237,45 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # actual reward
                 rw.append(reward)
+                action_task.append(action)
 
                 # update state, and counters
                 state = next_state.copy()
                 step += 1
 
+                # update posterior
+                # TODO: could speed up by iteratively adding
+                if (step + 1) % FLAGS.update_freq_post == 0 and (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
+
+                    if episode % FLAGS.save_frequency < 5 and n == 0:
+                        generate_posterior_plots(sess, QNet, base_dir, episode, hidden_idx(episode), step)
+
+                    reward_train = np.zeros([step + 1, ])
+                    state_train = np.zeros([step + 1, FLAGS.state_space])
+                    next_state_train = np.zeros([step + 1, FLAGS.state_space])
+                    action_train = np.zeros([step + 1, ])
+                    done_train = np.zeros([step + 1, 1])
+
+                    # fill arrays
+                    for k, experience in enumerate(tempbuffer.buffer):
+                        # [s, a, r, s', a*, d]
+                        state_train[k] = experience[0]
+                        action_train[k] = experience[1]
+                        reward_train[k] = experience[2]
+                        next_state_train[k] = experience[3]
+                        done_train[k] = experience[4]
+
+                    # update
+                    _, _ = sess.run([QNet.w_assign, QNet.L_assign],
+                                         feed_dict={QNet.context_state: state_train,
+                                                    QNet.context_action: action_train,
+                                                    QNet.context_reward: reward_train,
+                                                    QNet.context_state_next: next_state_train,
+                                                    QNet.context_done: done_train,
+                                                    QNet.nprec: noise_precision,
+                                                    QNet.is_online: False})
+
+                    sess.run(QNet.sample_post)
 
                     # -----------------------------------------------------------------------
 
@@ -243,17 +284,32 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 # append episode buffer to large buffer
                 fullbuffer.add(tempbuffer.buffer)
 
+            # KL divergence of action selection
+            _, action_count = np.unique(np.asarray(action_task), return_counts=True)
+            action_prob = 1.*action_count / np.sum(action_count)
+            kl_episode.append(np.sum([-p*np.log(p) for p in action_prob if p != 0.]))
+
+
         time_env.append(time.time() - start)
 
         if episode % 10 == 0:
             # tensorflow summaries
             reward_summary = tf.Summary(
-                value=[tf.Summary.Value(tag='Episodic Reward',
+                value=[tf.Summary.Value(tag='Performance2/Episodic Reward',
                                         simple_value=np.sum(np.array(rw)) * FLAGS.rew_norm / FLAGS.N_tasks)])
             learning_rate_summary = tf.Summary(
-                value=[tf.Summary.Value(tag='Learning rate', simple_value=learning_rate)])
+                value=[tf.Summary.Value(tag='Parameters/Learning rate', simple_value=learning_rate)])
+            split_ratio_summary = tf.Summary(
+                value=[tf.Summary.Value(tag='Parameters/Split ratio', simple_value=split_ratio)])
+            epsilon_summary = tf.Summary(
+                value=[tf.Summary.Value(tag='Parameters/Epsilon ratio', simple_value=eps)])
+            act_entropy_summary = tf.Summary(
+                value=[tf.Summary.Value(tag='Parameters/Entropy action', simple_value=np.mean(np.asarray(kl_episode)))])
             summary_writer.add_summary(reward_summary, episode)
+            summary_writer.add_summary(split_ratio_summary, episode)
+            summary_writer.add_summary(epsilon_summary, episode)
             summary_writer.add_summary(learning_rate_summary, episode)
+            summary_writer.add_summary(act_entropy_summary, episode)
             summary_writer.flush()
 
         # reward in episode
@@ -265,7 +321,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         if episode % 50 == 0:
             eps = np.max([0.1, eps*0.97])
-            print(eps)
 
         # ==================================================================================
         start = time.time()
@@ -296,7 +351,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
             noise_precision *= FLAGS.noise_precstep
 
-        if episode % FLAGS.split_N == 0 and episode > 0:
+        if episode % FLAGS.split_N == 0 and episode > 500:
             split_ratio = np.min([split_ratio + 0.003, FLAGS.split_ratio_max])
 
         # ===============================================================

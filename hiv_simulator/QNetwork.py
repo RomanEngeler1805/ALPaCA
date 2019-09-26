@@ -76,6 +76,14 @@ class QNetwork():
 
         return state
 
+    def huber_loss(self, y_true, y_pred, max_grad=1.):
+        """ Calculates the huber loss. """
+        err = tf.abs(y_true - y_pred, name='abs')
+        mg = tf.constant(max_grad, name='max_grad')
+        lin = mg * (err - .5 * mg)
+        quad = .5 * err * err
+        return tf.reduce_sum(tf.where(err < mg, quad, lin))
+
 
     def _build_model(self):
         ''' constructing tensorflow model '''
@@ -143,9 +151,8 @@ class QNetwork():
             self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
 
 
-
-        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
-        self.Q0 = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout')
+        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
+        self.Q0 = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Q0')
 
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
@@ -173,16 +180,17 @@ class QNetwork():
         self.Q = tf.einsum('im,bi->b', wt_bar, phi_taken, name='Q')
 
         # next state ----------------------------------------
-        Qnext = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi_next, name='Qnext')
+        Qnext = tf.einsum('jm,bjk->bk', wt_bar, self.phi_next, name='Qnext')
         self.max_action = tf.one_hot(tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
 
         self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
         self.phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
         self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='Qmax_target')
 
-        self.Qmax_target = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
+        self.Qmax_target = tf.einsum('im,bi->b', wt_bar, self.phi_max_target)
 
         self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_target)
+        self.Qtarget = tf.stop_gradient((self.Qtarget))
 
         # Q(s',a*)+ r- Q(s,a)
         self.Qdiff = self.Qtarget - self.Q
@@ -201,8 +209,15 @@ class QNetwork():
 
         self.loss2 = logdet_Sigma
 
-        # tf.losses.huber_loss(labels, predictions, delta=100.)
-        self.loss = self.loss0+ self.regularizer* self.loss_reg
+        # self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss_reg
+
+        # tf.losses.huber_loss(labels, predictions, delta=1.)
+        sigma_pred_inv = tf.linalg.inv(tf.sqrt(tf.linalg.diag(Sigma_pred)))
+        labels = tf.matmul(sigma_pred_inv, tf.reshape(self.Qtarget, [-1,1]))# tf.einsum('i,ik->k', self.Qtarget, tf.sqrt(sigma_pred_inv))
+        predictions = tf.matmul(sigma_pred_inv, tf.reshape(self.Q, [-1,1]))#tf.einsum('i,ik->k', self.Q, tf.sqrt(sigma_pred_inv))
+
+        # huber loss = 1/2 {x^ 2, d^ 2+ 0.5 |d-x|)
+        self.loss = 2.* self.huber_loss(labels, predictions, 1.)+ self.loss2+ self.regularizer* self.loss_reg
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
@@ -217,7 +232,7 @@ class QNetwork():
 
         # symbolic gradient of loss w.r.t. tvars
         gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
-        self.gradients = [(tf.clip_by_value(grad, -1e6, 1e6), var) for grad, var in gradients]
+        self.gradients = [(tf.clip_by_value(grad, -1e3, 1e3), var) for grad, var in gradients]
 
         #
         self.updateModel = self.optimizer.apply_gradients(zip(self.gradient_holders, self.tvars))
