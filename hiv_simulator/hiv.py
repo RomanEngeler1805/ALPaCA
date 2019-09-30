@@ -40,7 +40,7 @@ class HIVTreatment(object):
     eps_values_for_actions = np.array([[0., 0.], [.7, 0.], [0., .3], [.7, .3]])
 
     def __init__(self, logspace=True, dt=5, model_derivatives=None, perturb_state=True, \
-        p_T1=0, p_T2=0, p_T1s=0, p_T2s=0, p_V=0, p_E=0, rew_norm=1., **kw):
+        p_T1=0, p_T2=0, p_T1s=0, p_T2s=0, p_V=0, p_E=0, rew_norm=1., rew_log=False, **kw):
         """
         Initialize the environment.
         Keyword arguments:
@@ -66,6 +66,7 @@ class HIVTreatment(object):
         self.dt = dt
         self.reward_bound = 1e300
         self.rew_norm = rew_norm
+        self.rew_log = rew_log
         self.num_actions = 4
         self.perturb_params = ('p_lambda1','p_lambda2','p_k1','p_k2','p_f', \
             'p_m1','p_m2','p_lambdaE','p_bE','p_Kb','p_d_E','p_Kd')
@@ -115,7 +116,10 @@ class HIVTreatment(object):
         else:
             T1, T2, T1s, T2s, V, E = state
         # the reward function penalizes treatment because of side-effects
-        reward = -0.1*V - 2e4*eps1**2 - 2e3*eps2**2 + 1e3*E
+        if self.rew_log:
+            reward = np.log(np.max([0.1, -0.1*V - 2e4*eps1**2 - 2e3*eps2**2 + 1e3*E]))/ self.rew_norm# RE reward scaling
+        else:
+            reward = (-0.1 * V - 2e4 * eps1 ** 2 - 2e3 * eps2 ** 2 + 1e3 * E) / self.rew_norm  # RE reward scaling
         # Constrain reward to be within specified range
         if np.isnan(reward):
             reward = -self.reward_bound
@@ -156,7 +160,7 @@ class HIVTreatment(object):
         deriv_args = (eps1, eps2, perturb_params, p_lambda1, p_lambda2, p_k1, p_k2, p_f, p_m1, p_m2, p_lambdaE, p_bE, p_Kb, p_d_E, p_Kd)
         r.set_initial_value(self.state, t0).set_f_params(deriv_args)
         self.state = r.integrate(self.dt)
-        reward = self.calc_reward(action=action)/ self.rew_norm# RE reward scaling
+        reward = self.calc_reward(action=action)
         self.done = 0 # RE
         return self.observe(), reward, self.done
 

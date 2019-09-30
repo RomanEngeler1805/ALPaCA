@@ -18,44 +18,61 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.15)
 
 # General Hyperparameters
+# general
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_integer("action_space", 4, "Dimensionality of action space")  # only x-y currently
-tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
-tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 22, "Dimensionality of latent space")
-tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
-
-tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate") # X
-tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
-
-tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 100, "Maximum noise precision (1/var)")
-tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
-tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
-
-tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.4, "Maximum split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
-
+tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 tf.flags.DEFINE_integer("N_episodes", 6000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 200, "Length of episodes")
 
+# architecture
+tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
+tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
+
+# domain
+tf.flags.DEFINE_integer("param_case", 5, "Which of the 6 test param sets")
+tf.flags.DEFINE_integer("action_space", 4, "Dimensionality of action space")  # only x-y currently
+tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
+
+# posterior
+tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 0.1, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
+tf.flags.DEFINE_float("noise_precstep", 1.005, "Step of noise precision s*=ds")
+
+tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
+tf.flags.DEFINE_float("split_ratio", 0.4, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.4, "Maximum split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
+
+# exploration
+tf.flags.DEFINE_float("eps_initial", 0.9, "Initial value for epsilon-greedy")
+tf.flags.DEFINE_float("eps_final", 0.1, "Final value for epsilon-greedy")
+tf.flags.DEFINE_float("eps_step", 0.999, "Multiplicative step for epsilon-greedy")
+
+# target
 tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
-tf.flags.DEFINE_float("rew_norm", 1e5, "Normalization factor for reward") # X
+# loss
+tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate") # X
+tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("grad_clip", 1e4, "Absolute value to clip gradients")
+tf.flags.DEFINE_float("huber_d", 1e0, "Switch point from quadratic to linear")
+tf.flags.DEFINE_float("regularizer", 1e-3, "Regularization parameter") # X
 
+# reward
+tf.flags.DEFINE_float("rew_norm", 1e0, "Normalization factor for reward")
+tf.flags.DEFINE_bool("rew_log", True, "If Log of reward is taken")
+
+# memory
 tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
-tf.flags.DEFINE_float("regularizer", 1e-3, "Regularization parameter") # X
-tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
 
-tf.flags.DEFINE_integer("param_case", 5, "Which of the 6 test param sets")
-
+#
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
 
 FLAGS = tf.flags.FLAGS
@@ -92,7 +109,7 @@ def hidden_idx(episode):
 # Main Routine ===========================================================================
 #
 batch_size = FLAGS.batch_size
-eps = 0.1
+eps = FLAGS.eps_initial
 split_ratio = FLAGS.split_ratio
 
 # get TF logger --------------------------------------------------------------------------
@@ -145,7 +162,7 @@ tempbuffer = replay_buffer(FLAGS.L_episode)  # buffer for episode
 log.info('Build Tensorflow Graph')
 
 # initialize environment
-env = HIVTreatment(rew_norm= FLAGS.rew_norm)
+env = HIVTreatment(rew_norm= FLAGS.rew_norm, rew_log=FLAGS.rew_log)
 
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     QNet = QNetwork(FLAGS, scope='QNetwork')  # neural network
@@ -178,6 +195,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     time_env = []
     time_sgd = []
 
+
     # -----------------------------------------------------------------------------------
     # loop episodes
     print("Episodes...")
@@ -190,7 +208,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # count reward
         rw = []
         action_task = []
-        kl_episode = []
+        entropy_episode = []
 
         start = time.time()
 
@@ -236,7 +254,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 tempbuffer.add(new_experience)
 
                 # actual reward
-                rw.append(reward)
+                if FLAGS.rew_log:
+                    rw.append(np.exp(reward* FLAGS.rew_norm))
+                else:
+                    rw.append(reward* FLAGS.rew_norm)
                 action_task.append(action)
 
                 # update state, and counters
@@ -284,10 +305,12 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 # append episode buffer to large buffer
                 fullbuffer.add(tempbuffer.buffer)
 
-            # KL divergence of action selection
+            # entropy of action selection
             _, action_count = np.unique(np.asarray(action_task), return_counts=True)
             action_prob = 1.*action_count / np.sum(action_count)
-            kl_episode.append(np.sum([-p*np.log(p) for p in action_prob if p != 0.]))
+            entropy_episode.append(np.sum([-p*np.log(p) for p in action_prob if p != 0.]))
+
+            # state space coverage
 
 
         time_env.append(time.time() - start)
@@ -296,7 +319,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # tensorflow summaries
             reward_summary = tf.Summary(
                 value=[tf.Summary.Value(tag='Performance2/Episodic Reward',
-                                        simple_value=np.sum(np.array(rw)) * FLAGS.rew_norm / FLAGS.N_tasks)])
+                                        simple_value=np.sum(np.array(rw)) / FLAGS.N_tasks)])
             learning_rate_summary = tf.Summary(
                 value=[tf.Summary.Value(tag='Parameters/Learning rate', simple_value=learning_rate)])
             split_ratio_summary = tf.Summary(
@@ -304,7 +327,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             epsilon_summary = tf.Summary(
                 value=[tf.Summary.Value(tag='Parameters/Epsilon ratio', simple_value=eps)])
             act_entropy_summary = tf.Summary(
-                value=[tf.Summary.Value(tag='Parameters/Entropy action', simple_value=np.mean(np.asarray(kl_episode)))])
+                value=[tf.Summary.Value(tag='Exploration-Exploitation/Entropy action', simple_value=np.mean(np.asarray(entropy_episode)))])
             summary_writer.add_summary(reward_summary, episode)
             summary_writer.add_summary(split_ratio_summary, episode)
             summary_writer.add_summary(epsilon_summary, episode)
@@ -317,10 +340,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         # visual inspection ================================================================
         if episode % FLAGS.save_frequency == 0:
-            generate_plots(base_dir, tempbuffer, FLAGS, episode)
+            generate_plots(sess, summary_writer, base_dir, tempbuffer, FLAGS, episode)
 
-        if episode % 50 == 0:
-            eps = np.max([0.1, eps*0.97])
+        eps = np.max([FLAGS.eps_final, eps*FLAGS.eps_step])
 
         # ==================================================================================
         start = time.time()
