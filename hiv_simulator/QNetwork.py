@@ -377,7 +377,7 @@ class QNetwork():
                 phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
 
             # stop gradient through context
-            phi_max = tf.stop_gradient(phi_max)
+            #phi_max = tf.stop_gradient(phi_max)
             phi_hat = phi_taken - self.gamma * phi_max
 
             # update posterior distribution
