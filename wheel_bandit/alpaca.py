@@ -13,7 +13,7 @@ import pandas as pd
 import sys
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.16)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
@@ -28,13 +28,13 @@ tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
-tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N steps")
-tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
+tf.flags.DEFINE_float("noise_precmax", 100, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
+tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.1, "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 512./562, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.9, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
@@ -160,7 +160,7 @@ for ds in range(num_datasets):
                                                                       mean_v, std_v, mu_large, std_large)
 
 # evaluation
-num_eval = 2000
+num_eval = 1000
 eval_batch_size = 500
 n_shuffle = 50
 deltas_eval = np.array([0.5, 0.7, 0.9, 0.95, 0.99])
@@ -447,7 +447,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     sess.run([QNet.sample_prior])
 
                     # loop over dataset (context part)
-                    for i in range(np.int(split_ratio * FLAGS.L_episode)):
+                    for i in range(num_eval):
 
                         # plot
                         if sh == 0 and (i % 50 == 0 or i== np.int(split_ratio * FLAGS.L_episode)-1):
@@ -472,17 +472,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                                 QNet.context_reward: rew_agent_online[i:i+1],
                                                 QNet.nprec: FLAGS.noise_precision,
                                                 QNet.is_online: True, QNet.use_cholesky: False})
-
-                    # after context
-                    for i in range(np.int(split_ratio * FLAGS.L_episode), num_eval, eval_batch_size):
-                        # prediction
-                        Qval = sess.run(QNet.Qout, feed_dict={QNet.state: dataset_eval[de, i:i+eval_batch_size, :2].reshape(-1, FLAGS.state_space)})
-                        action = np.argmax(Qval, axis=1)
-
-                        # store values
-                        actions[i:i + len(action)] = action
-                        rew_agent_online[i:i+eval_batch_size] = dataset_eval[de, i:i+eval_batch_size][np.arange(len(action)), 2 + action]
-                        rew_rand_online[i:i+eval_batch_size] = dataset_eval[de, i:i+eval_batch_size][np.arange(len(action)), 2 + np.random.randint(0, 5, size=len(action))]
 
                     # save observed online reward (sum)
                     rew_agent_episode_cumulative[sh] = np.sum(rew_agent_online)

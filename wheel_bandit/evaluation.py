@@ -49,7 +49,7 @@ if not os.path.exists(save_dir):
 num_contexts = 80000
 num_datasets = 100
 batch_size = 1000
-context = 10000
+context = 1000
 
 num_actions = 5
 context_dim = 2

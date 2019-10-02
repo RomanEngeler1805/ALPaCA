@@ -67,9 +67,9 @@ class QNetwork():
         state = tf.tile(state, [1, 1, self.action_dim])
         state = tf.reshape(state, [-1, self.state_dim])
 
-        action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
+        #action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
 
-        state = tf.concat([state, action], axis = 1)
+        #state = tf.concat([state, action], axis = 1)
 
         return state
 

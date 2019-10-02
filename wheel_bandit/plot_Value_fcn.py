@@ -47,10 +47,10 @@ def plot_Value_fcn(path, env_delta, sess, model, noise_precision, buffer=[]):
             ax[act].scatter(phipos, rpos, marker='o', color='r', s=1. + np.log(reward_train[loc]) * 10)
 
         # plot settings
-        ax[act].set_xlim([0,1])
-        ax[act].set_ylim([0,1])
-        ax[act].set_xticks()
-        ax[act].set_yticks()
+        ax[act].set_xticklabels([])
+        ax[act].set_ylim([0, 1])
+        ax[act].set_yticklabels([])
+
         cb = fig.colorbar(im, ax=ax[act], orientation="horizontal", pad=0.1)
         tick_locator = ticker.MaxNLocator(nbins=4)
         cb.locator = tick_locator
