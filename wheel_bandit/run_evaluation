@@ -1,0 +1,22 @@
+#!/bin/bash
+echo "==================="
+for checkpoint in '2400' '2800' '3200' '3600'
+do
+  python evaluation.py --model_name='23-26-13_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='23-27-13_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='00-24-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='00-25-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='05-36-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='05-37-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='08-52-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='08-53-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='11-57-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='11-58-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='13-56-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='13-57-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='16-03-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='16-04-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='18-19-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='18-18-14_09-19' --checkpoint=$checkpoint --
+  python evaluation.py --model_name='20-10-17_09-19' --checkpoint=$checkpoint --
+done
