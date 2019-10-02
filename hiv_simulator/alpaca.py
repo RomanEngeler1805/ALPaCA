@@ -45,7 +45,7 @@ tf.flags.DEFINE_float("noise_precstep", 1.005, "Step of noise precision s*=ds")
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.4, "Initial split ratio for conditioning")
 tf.flags.DEFINE_float("split_ratio_max", 0.4, "Maximum split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 30, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
 # exploration
 tf.flags.DEFINE_float("eps_initial", 0.1, "Initial value for epsilon-greedy")
@@ -57,7 +57,7 @@ tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 # loss
-tf.flags.DEFINE_float("learning_rate", 1e-2, "Initial learning rate") # X
+tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate") # X
 tf.flags.DEFINE_float("lr_drop", 1.001, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("grad_clip", 1e4, "Absolute value to clip gradients")
 tf.flags.DEFINE_float("huber_d", 1e0, "Switch point from quadratic to linear")
