@@ -22,10 +22,10 @@ tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 4, "Dimensionality of latent space")
-tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
+tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
+tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
 
-tf.flags.DEFINE_float("learning_rate", 5e-4, "Initial learning rate")
+tf.flags.DEFINE_float("learning_rate", 3e-4, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.0001, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.2, "Prior precision (1/var)")
@@ -35,15 +35,15 @@ tf.flags.DEFINE_integer("noise_Ndrop", 50, "Increase noise precision every N ste
 tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.9, "Initial split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_float("split_ratio", 0.2, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 4, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 4001, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 6001, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 10, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
 
 tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
@@ -524,10 +524,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # ===============================================================
             # evaluation
-            if episode == 3000:
+            if episode == 8000:
                 N_eval = 10000
             else:
-                N_eval = 1000
+                N_eval = 100
 
             reward_eval = np.zeros([N_eval])
 
@@ -591,7 +591,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             summary_writer.add_summary(reward_eval_summary, episode)
             summary_writer.flush()
 
-            if episode == 3000:
+            if episode == 8000:
                 # write regret to file
                 regret = np.sum(reward_eval.reshape(100, 100), axis=1)/ 100/ rew_opt
                 regr = np.mean(regret)

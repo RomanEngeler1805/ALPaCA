@@ -31,19 +31,19 @@ class environment():
         self.state[(self.size - 1) / 2] = 1
         return self.state
 
-    '''
+
     def reward(self):
         # Sparse Reward
         if self.state[self.target] == 1:
             return 1.
-        return 0.
+        return -0.1
 
     '''
 
     def reward(self):
         # dense reward
         return 10.*(self.size- 1- np.abs(self.target- np.argmax(self.state)))/ (self.size- 1)
-
+    '''
 
     '''
     def reward(self):
