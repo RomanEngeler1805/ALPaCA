@@ -13,14 +13,14 @@ import pandas as pd
 import sys
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.16)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 
 # General Hyperparameters
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 2, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 64, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
 
 tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
@@ -28,13 +28,13 @@ tf.flags.DEFINE_float("lr_drop", 1.00015, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 20, "Maximum noise precision (1/var)")
-tf.flags.DEFINE_integer("noise_Ndrop", 30, "Increase noise precision every N steps")
-tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
+tf.flags.DEFINE_float("noise_precmax", 100, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
+tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
 
-tf.flags.DEFINE_integer("split_N", 30, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.1, "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 512./562, "Initial split ratio for conditioning")
+tf.flags.DEFINE_integer("split_N", 10, "Increase split ratio every N steps")
+tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.9, "Initial split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 1, "Update frequency of posterior and sampling of new policy")
 
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
@@ -50,7 +50,7 @@ tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target net
 
 tf.flags.DEFINE_integer("replay_memory_size", 8, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 400, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 1.0, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'relu', 'Non-linearity used in encoder')
 
@@ -160,13 +160,16 @@ for ds in range(num_datasets):
                                                                       mean_v, std_v, mu_large, std_large)
 
 # evaluation
+num_eval = 1000
+eval_batch_size = 500
+n_shuffle = 50
 deltas_eval = np.array([0.5, 0.7, 0.9, 0.95, 0.99])
 
-dataset_eval = np.empty([len(deltas_eval), num_contexts, 7])
-opt_wheel_eval = np.empty([len(deltas_eval), num_contexts, 2])
+dataset_eval = np.empty([len(deltas_eval), num_eval, 7])
+opt_wheel_eval = np.empty([len(deltas_eval), num_eval, 2])
 
 for ds in range(len(deltas_eval)):
-    dataset_eval[ds], opt_wheel_eval[ds] = sample_wheel_bandit_data(num_contexts, deltas_eval[ds],
+    dataset_eval[ds], opt_wheel_eval[ds] = sample_wheel_bandit_data(num_eval, deltas_eval[ds],
                                                                       mean_v, std_v, mu_large, std_large)
 
 # ========================================
@@ -274,11 +277,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 if (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
 
                     # update
-                    _ = sess.run([QNet.sample_post],
-                             feed_dict={QNet.context_state: state.reshape(-1,2),
-                                        QNet.context_action: action.reshape(-1),
-                                        QNet.context_reward: reward.reshape(-1),
-                                        QNet.nprec: noise_precision, QNet.is_online: True})
+                    try:
+                        _ = sess.run([QNet.sample_post],
+                                 feed_dict={QNet.context_state: state.reshape(-1,2),
+                                            QNet.context_action: action.reshape(-1),
+                                            QNet.context_reward: reward.reshape(-1),
+                                            QNet.nprec: noise_precision, QNet.is_online: True})
+                    except:
+                        _ = sess.run([QNet.sample_post],
+                                     feed_dict={QNet.context_state: state.reshape(-1, 2),
+                                                QNet.context_action: action.reshape(-1),
+                                                QNet.context_reward: reward.reshape(-1),
+                                                QNet.nprec: noise_precision, QNet.is_online: True,
+                                                QNet.use_cholesky: False})
 
                 # update state, and counters
                 step += 1
@@ -387,7 +398,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_precision *= FLAGS.noise_precstep
 
         if episode % FLAGS.split_N == 0 and episode > 0:
-            split_ratio = np.min([split_ratio + 0.01, FLAGS.split_ratio_max])
+            split_ratio = np.min([split_ratio + 0.003, FLAGS.split_ratio_max])
 
         # ===============================================================
         # print to console
@@ -399,17 +410,16 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 np.round(noise_precision, 4)) + ', Split ratio: ' + str(np.round(split_ratio, 2)))
 
             # evaluation of regret to compare against bayesian bandit showdown paper ===================================
-            n_shuffle = 10
 
             # loop over exploration parameter
             for de, deval in enumerate(deltas_eval):
 
-                cum_regr_QN = np.zeros([n_shuffle])
-                cum_regr_UF = np.zeros([n_shuffle])
+                # arrays for final statistics
+                rew_agent_episode_cumulative = np.zeros([num_datasets])
+                rew_rand_episode_cumulative = np.zeros([num_datasets])
 
-                cum_rew_QN = np.zeros([n_shuffle])
-                cum_rew_UF = np.zeros([n_shuffle])
-                cum_rew_ST = np.zeros([n_shuffle])
+                # array to keep track of indices of shuffled array
+                shuffle_idx = np.arange(num_eval)
 
                 # ----------------------------------------------------------------------------------------------
 
@@ -420,83 +430,71 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 plot_Value_fcn(path, deval, sess, QNet, noise_precision)
 
                 # -----------------------------------------------------------------------------------------------
-
+                # loop and reshuffle dataset
                 for sh in range(n_shuffle):
-
-                    shuffle_idx = np.random.permutation(np.arange(num_contexts))
+                    # reshuffle data set
+                    np.random.shuffle(shuffle_idx)
                     dataset_eval[de] = dataset_eval[de, shuffle_idx, :]
                     opt_wheel_eval[de] = opt_wheel_eval[de, shuffle_idx, :]
 
-                    # store expected rewards
-                    rw = []
-                    r_star = 0
-                    r_uni = []
-
-                    actions = []
-
-                    # loop steps
-                    step = 0
+                    # arrays to keep track of actions and rewards
+                    actions = np.zeros(num_eval)
+                    rew_agent_online = np.zeros(num_eval)
+                    rew_rand_online = np.zeros(num_eval)
 
                     # sample w from prior
                     sess.run(QNet.reset_post)
                     sess.run([QNet.sample_prior])
 
-                    r_star += np.sum(opt_wheel_eval[de, :, 0])
+                    # loop over dataset (context part)
+                    for i in range(num_eval):
 
-                    while step < num_contexts:
-                        state = dataset_eval[de, step, :2]
+                        # plot
+                        if sh == 0 and (i % 50 == 0 or i== np.int(split_ratio * FLAGS.L_episode)-1):
+                            # plot with trajectory
+                            path = dir + 'Epoch_' + str(episode) + '_step_'+ str(i)
+                            buff = [dataset_eval[de, :, :2], actions[:i], rew_agent_online[:i], np.zeros([i,2]), np.zeros([i])]
+                            plot_Value_fcn(path, deval, sess, QNet, noise_precision, buff)
 
-                        # uniform reward
-                        r_uni.append(dataset_eval[de,step, 2+ np.random.randint(5)])
-
-                        # take a step
-                        Qval = sess.run([QNet.Qout], feed_dict={QNet.state: state.reshape(-1, FLAGS.state_space)})
+                        # prediction
+                        Qval = sess.run([QNet.Qout], feed_dict={QNet.state: dataset_eval[de, i, :2].reshape(-1, FLAGS.state_space)})
                         action = eGreedyAction(Qval, eps)
 
-                        actions.append(action)
-                        reward = dataset_eval[de,step, 2+ action]
+                        # store values
+                        actions[i] = action
+                        rew_agent_online[i] = dataset_eval[de, i, 2 + action]
+                        rew_rand_online[i] = dataset_eval[de, i, 2 + np.random.randint(0, 5)]
 
-                        # expected model reward
-                        rw.append(reward)
+                        # calculate posterior
+                        _ = sess.run([QNet.sample_post],
+                                     feed_dict={QNet.context_state: dataset_eval[de, i:i+1, :2],
+                                                QNet.context_action: actions[i:i+1],
+                                                QNet.context_reward: rew_agent_online[i:i+1],
+                                                QNet.nprec: FLAGS.noise_precision,
+                                                QNet.is_online: True, QNet.use_cholesky: False})
 
-                        # update posterior
-                        if  (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
-                            # update
-                            _ = sess.run(QNet.sample_post,
-                                    feed_dict={QNet.context_state: state.reshape(-1,2),
-                                               QNet.context_action: action.reshape(-1),
-                                               QNet.context_reward: reward.reshape(-1),
-                                               QNet.nprec: noise_precision, QNet.is_online: True})
+                    # save observed online reward (sum)
+                    rew_agent_episode_cumulative[sh] = np.sum(rew_agent_online)
+                    rew_rand_episode_cumulative[sh] = np.sum(rew_rand_online)
 
-                        # update
-                        step += 1
+                # cumulative regret
+                mean_reward_agent = np.mean(rew_agent_episode_cumulative)
+                mean_reward_rand = np.mean(rew_rand_episode_cumulative)
+                mean_reward_opt = np.sum(opt_wheel_eval[de, :, 0])
 
-                    cum_rew_QN[sh] = np.sum(np.array(rw))
-                    cum_rew_UF[sh] = np.sum(np.array(r_uni))
-                    cum_rew_ST[sh] = np.sum(np.array(r_star))
-
-                    cum_regr_QN[sh] = np.sum(np.array(r_star)) - np.sum(np.array(rw))
-                    cum_regr_UF[sh] = np.sum(np.array(r_star)) - np.sum(np.array(r_uni))
+                cum_regret = mean_reward_opt - mean_reward_agent
+                cum_regret_norm = 100. * cum_regret / (mean_reward_opt - mean_reward_rand)
 
                 # plot with trajectory
                 path = dir + 'Epoch_' + str(episode)+ '_observations'
-                buff = [dataset_eval[de, :,:2], np.asarray(actions), np.asarray(rw)]
-                plot_Value_fcn(path, deval, sess, QNet, noise_precision, buff)
+                buff = [dataset_eval[de, :,:2], actions, rew_agent_online]
+                #plot_Value_fcn(path, deval, sess, QNet, noise_precision, buff)
 
                 # summaries
-                val_rew_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation Reward normalized (delta '+ str(deval)+ ')',
-                                                                         simple_value=np.mean(cum_rew_QN)/ np.mean(cum_rew_ST))])
-                summary_writer.add_summary(val_rew_summary, episode)
-
-                regret_valid = cum_regr_QN / cum_regr_UF* 100
-                regret_valid = np.mean(regret_valid)
-
                 tag_name = 'Validation Cumulative Regret (delta '+ str(deval)+ ')'
-                regret_norm_summary = tf.Summary(value=[tf.Summary.Value(tag=tag_name, simple_value=regret_valid)])
+                regret_norm_summary = tf.Summary(value=[tf.Summary.Value(tag=tag_name, simple_value=cum_regret_norm)])
                 summary_writer.add_summary(regret_norm_summary, episode)
-
             summary_writer.flush()
-
 
     # write reward to file
     df = pd.DataFrame(reward_episode)

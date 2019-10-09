@@ -67,9 +67,9 @@ class QNetwork():
         state = tf.tile(state, [1, 1, self.action_dim])
         state = tf.reshape(state, [-1, self.state_dim])
 
-        action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
+        #action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
 
-        state = tf.concat([state, action], axis = 1)
+        #state = tf.concat([state, action], axis = 1)
 
         return state
 
@@ -82,6 +82,7 @@ class QNetwork():
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
 
         self.is_online = tf.placeholder_with_default(False, shape=[], name='is_online')
+        self.use_cholesky = tf.placeholder_with_default(True, shape=[], name='use_cholesky')
 
         # placeholders context data =======================================================
         self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
@@ -136,7 +137,7 @@ class QNetwork():
 
         # update posterior if there is data
         self.wt_bar = tf.get_variable('wt_bar', initializer=self.w0_bar, trainable=False)
-        self.Lt_inv = tf.get_variable('Lt_inv', initializer=tf.linalg.inv(self.L0), trainable=False)
+        self.Lt_inv = tf.get_variable('Lt_inv', initializer=tf.linalg.inv(self.L0), trainable=False) # covariance
         self.wt_unnorm = tf.get_variable('wt_unnorm', initializer=tf.matmul(self.L0, self.w0_bar), trainable=False)
 
         wt_bar, Lt_inv = tf.cond(bsc > 0,
@@ -176,7 +177,7 @@ class QNetwork():
         self.loss2 = logdet_Sigma
         self.loss_reg = tf.losses.get_regularization_loss()
 
-        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss_reg
+        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss_reg#+ 0.1* tf.reduce_sum(tf.square(tf.linalg.eigvalsh(Lt_inv)))
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
@@ -224,21 +225,28 @@ class QNetwork():
 
     def _sample_prior(self):
         ''' sample wt from prior '''
-        update_op = tf.assign(self.wt, self._sample_MN(self.w0_bar, tf.matrix_inverse(self.L0)))
+        update_op = tf.assign(self.wt, self._sample_MN_cholesky(self.w0_bar, tf.matrix_inverse(self.L0)))
         return update_op
 
     def _sample_posterior(self, wt_bar, Lt_inv):
         ''' sample wt from posterior '''
-        update_op = tf.assign(self.wt, self._sample_MN(wt_bar, Lt_inv))
+        update_op = tf.assign(self.wt, tf.cond(self.use_cholesky,
+                                               lambda: self._sample_MN_cholesky(wt_bar, Lt_inv),
+                                               lambda: self._sample_MN_eigh(wt_bar, Lt_inv)))
         return update_op
 
-    def _sample_MN(self, mu, cov):
+    def _sample_MN_cholesky(self, mu, cov):
         ''' sample from multi-variate normal '''
-        A = tf.linalg.cholesky(cov)
-        #V, U = tf.linalg.eigh(cov)
-        z = tf.random_normal(shape=[self.latent_dim,1])
+        z = tf.random_normal(shape=[self.latent_dim, 1])
+        A = tf.linalg.cholesky(cov + tf.diag(tf.constant(1e-6, shape=[self.latent_dim], dtype=tf.float32)))
         x = mu + tf.matmul(A, z)
-        #x = mu+ tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
+        return x
+
+    def _sample_MN_eigh(self, mu, cov):
+        ''' sample from multi-variate normal '''
+        z = tf.random_normal(shape=[self.latent_dim, 1])
+        V, U = tf.linalg.eigh(cov)
+        x = mu + tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
         return x
 
     def _update_posterior(self, phi_hat, reward):
