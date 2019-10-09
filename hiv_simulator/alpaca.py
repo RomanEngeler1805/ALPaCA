@@ -43,13 +43,13 @@ tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N step
 tf.flags.DEFINE_float("noise_precstep", 1.005, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.4, "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.4, "Maximum split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.0, "Maximum split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
 # exploration
-tf.flags.DEFINE_float("eps_initial", 0.1, "Initial value for epsilon-greedy")
-tf.flags.DEFINE_float("eps_final", 0.1, "Final value for epsilon-greedy")
+tf.flags.DEFINE_float("eps_initial", 0.9, "Initial value for epsilon-greedy")
+tf.flags.DEFINE_float("eps_final", 0.05, "Final value for epsilon-greedy")
 tf.flags.DEFINE_float("eps_step", 0.999, "Multiplicative step for epsilon-greedy")
 
 # target
@@ -68,9 +68,9 @@ tf.flags.DEFINE_float("rew_norm", 1e0, "Normalization factor for reward")
 tf.flags.DEFINE_bool("rew_log", True, "If Log of reward is taken")
 
 # memory
-tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 10, "Store images every N-th episode")
 
 #
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
@@ -83,7 +83,7 @@ tf.set_random_seed(FLAGS.random_seed)
 
 from hiv import HIVTreatment
 from QNetwork import QNetwork
-from generate_plots import generate_plots, evaluation_plots, value_function_plot, generate_posterior_plots
+from generate_plots import generate_plots, evaluation_plots, value_function_plot, generate_posterior_plots, policy_plot
 from update_model import update_model
 
 sys.path.insert(0, './..')
@@ -103,7 +103,7 @@ def create_dictionary(dir_name):
         os.makedirs(dir_name)
 
 def hidden_idx(episode):
-    idx_candidate = np.array([1, 2, 3, 5])
+    idx_candidate = np.array([0])
     return idx_candidate[episode% len(idx_candidate)]
 
 # Main Routine ===========================================================================
@@ -155,6 +155,8 @@ Qprior = base_dir + '/Qprior/'
 create_dictionary(Qprior)
 Qposterior_dir = base_dir + '/Qposterior/'
 create_dictionary(Qposterior_dir)
+policy_dir = base_dir + '/Policy/'
+create_dictionary(policy_dir)
 
 # initialize replay memory and model
 fullbuffer = replay_buffer(FLAGS.replay_memory_size)  # large buffer to store all experience
@@ -197,8 +199,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
     # -----------------------------------------------------------------------------------
     # fill replay memory with random transitions
-    '''
-    for ep in range(1000):
+
+    for ep in range(200):
         # episode buffer
         tempbuffer.reset()
 
@@ -225,7 +227,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         fullbuffer.add(tempbuffer.buffer)
 
     print('Replay Buffer Filled!')
-    '''
 
     # -----------------------------------------------------------------------------------
     # loop episodes
@@ -295,12 +296,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 state = next_state.copy()
                 step += 1
 
+                if episode % FLAGS.save_frequency < 5 and n == 0 and step == 0:
+                    generate_posterior_plots(sess, QNet, base_dir, episode, hidden_idx(episode), step)
+                    policy_plot(sess, QNet, tempbuffer, FLAGS, episode, hidden_idx(episode), step, base_dir)
+
                 # update posterior
                 # TODO: could speed up by iteratively adding
                 if (step + 1) % FLAGS.update_freq_post == 0 and (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
-
-                    if episode % FLAGS.save_frequency < 5 and n == 0:
-                        generate_posterior_plots(sess, QNet, base_dir, episode, hidden_idx(episode), step)
 
                     reward_train = np.zeros([step + 1, ])
                     state_train = np.zeros([step + 1, FLAGS.state_space])
@@ -328,6 +330,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                                     QNet.is_online: False})
 
                     sess.run(QNet.sample_post)
+
+                    if episode % FLAGS.save_frequency < 5 and n == 0:
+                        generate_posterior_plots(sess, QNet, base_dir, episode, hidden_idx(episode), step)
+                        policy_plot(sess, QNet, tempbuffer, FLAGS, episode, hidden_idx(episode), step, base_dir)
 
                     # -----------------------------------------------------------------------
 

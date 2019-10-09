@@ -45,7 +45,7 @@ def update_model(sess,
         done_sample = np.zeros((L_episode,))
 
         # fill arrays
-        for k, (s in enumerate(experience[0]):
+        for k, (s0, a, r, s1, d) in enumerate(experience[0]):
             state_sample[k] = s0
             action_sample[k] = a
             reward_sample[k] = r

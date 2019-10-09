@@ -191,8 +191,9 @@ class QNetwork():
         # loss function ==================================================================
         # IMPORTANT: use here wt_bar and Lt_inv not the self. version since gradient cannot flow through assign
         # Q values
-        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout') # for only exploration
-        self.Q0 = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Q0') # for ?
+        self.Qout = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Qout') # for only exploration
+        self.Q0 = tf.einsum('jm,bjk->bk', self.w0_bar, self.phi, name='Q0') # for plotting
+        self.Q1 = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi, name='Q1')  # for plotting
         self.Q = tf.einsum('im,bi->b', wt_bar, phi_taken, name='Q') # for Bellmann residual
         Qnext = tf.einsum('jm,bjk->bk', wt_bar, self.phi_next, name='Qnext') # for Bellmann residual
 
@@ -200,13 +201,13 @@ class QNetwork():
         self.max_action = tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]) # max action from Q network
         self.amax_online = tf.placeholder(shape=[None,1], dtype=tf.int32, name='amax_online') # amax into Target network
         self.phi_max = tf.reduce_sum(tf.multiply(self.phi_next, tf.one_hot(self.amax_online, self.action_dim, dtype=tf.float32)), axis=2) # phi_max from target network
-        self.Qmax = tf.reduce_sum(tf.multiply(Qnext, tf.dtypes.cast(self.amax_online, dtype=tf.float32)), axis=1) # Qmax from target network
+        self.Qmax = tf.reduce_sum(tf.multiply(Qnext, tf.cast(self.amax_online, dtype=tf.float32)), axis=1) # Qmax from target network
         #
         self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='amax_target') # phi_max into Q network
         self.Qmax_online = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target') # Qmax into Q network
         # Qtarget = r- Q(s,a)
         self.QQ = tf.einsum('im,bi->b', wt_bar, self.phi_max_target)  # for Bellmann residual
-        self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.QQ)
+        self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_online)
         self.Qtarget = tf.stop_gradient((self.Qtarget))
 
         # Bellmann residual

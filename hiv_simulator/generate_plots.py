@@ -23,7 +23,7 @@ def plot_to_image(figure):
   return image
 
 def log_dynamics(sess, writer, tag, values, step):
-    """Logs the histogram of a list/vector of values."""
+    """Logs the dynamics of a list/vector of values."""
     figure = plt.figure()
     plt.plot(values[:, 4:])
     plt.xlabel('time')
@@ -332,6 +332,51 @@ def generate_posterior_plots(sess, QNet, base_dir, episode, patient, step):
     ax[1].set_ylabel('E')
     fig.colorbar(im, ax=ax[1], orientation="horizontal", pad=0.2)
     plt.savefig(Qposterior_dir + 'Episode_' + str(episode)+ '_patient_'+ str(patient)+ '_step_'+ str(step))
+    plt.close()
+
+
+def policy_plot(sess, QNet, buffer, FLAGS, episode, patient, step, base_dir):
+    '''
+    plot cut through policy
+    '''
+    policy_dir = base_dir + '/Policy/'
+    Nx = 30
+    Ny = 20
+
+    # visualize observed states
+    trajectory_length = len(buffer.buffer)
+    reward_train = np.zeros([trajectory_length, ])
+    state_train = np.zeros([trajectory_length, FLAGS.state_space])
+    next_state_train = np.zeros([trajectory_length, FLAGS.state_space])
+    action_train = np.zeros([trajectory_length, ])
+    done_train = np.zeros([trajectory_length, 1])
+
+    # fill arrays
+    for k, experience in enumerate(buffer.buffer):
+        # [s, a, r, s', a*, d]
+        state_train[k] = experience[0]
+        action_train[k] = experience[1]
+        reward_train[k] = experience[2]
+        next_state_train[k] = experience[3]
+        done_train[k] = experience[4]
+
+    mesh = generate_mesh()
+
+    #
+    Qmean = sess.run(QNet.Q1, feed_dict={QNet.state: mesh})
+    Policy = np.argmax(Qmean, axis=1)
+
+    Policy[0:4] = np.arange(4)
+
+    plt.figure()
+    im = plt.imshow(Policy.reshape(Ny, Nx), extent=[0,8,0,4]) # (y, x)
+    plt.scatter(state_train[:, 4], state_train[:, 5])
+    plt.xlabel('V')
+    plt.ylabel('E')
+    plt.xlim([0, 8])
+    plt.ylim([0, 4])
+    plt.colorbar(im, boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5])
+    plt.savefig(policy_dir+ 'Episode_'+ str(episode)+ '_Patient_'+ str(patient) + '_Step_'+ str(step))
     plt.close()
 
 
