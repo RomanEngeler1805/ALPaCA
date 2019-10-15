@@ -1,0 +1,6 @@
+[submodule "pushing_simulation/pushing_simulation"]
+	path = pushing_simulation/pushing_simulation
+	url = git@github.com:RomanEngeler1805/pushing_simulation.git
+[submodule "pushing_simulation"]
+	path = pushing_simulation
+	url = git@github.com:RomanEngeler1805/pushing_simulation.git
