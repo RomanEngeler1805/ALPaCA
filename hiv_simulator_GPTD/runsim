@@ -1,0 +1,10 @@
+#!/bin/bash
+echo "==================="
+rs1=1234
+rs2=2345
+for param_case in 0
+do
+    python alpaca.py --param_case=$param_case --random_seed=$rs1 &
+    sleep 1m
+    python alpaca.py --param_case=$param_case --random_seed=$rs2
+done
