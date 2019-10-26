@@ -22,12 +22,8 @@ class QNetwork():
             self.activation = tf.nn.sigmoid
         elif FLAGS.non_linearity == 'tanh':
             self.activation = tf.nn.tanh
-        elif FLAGS.non_linearity == 'elu':
-            self.activation = tf.nn.elu
         elif FLAGS.non_linearity == 'leaky_relu':
             self.activation = tf.nn.leaky_relu
-        elif FLAGS.non_linearity == 'selu':
-            self.activation = tf.nn.selu
         else:
             self.activation = tf.nn.relu
 

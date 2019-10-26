@@ -190,8 +190,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     # report mean reward per episode
     reward_episode = []
 
-    with open('./' + 'hiv' + '_preset_hidden_params', 'r') as f:
+    with open('./' + 'hiv_generated_hidden_params', 'r') as f:
         preset_parameters = pickle.load(f)
+        valid_parameters_index = np.ones(len(preset_parameters))
+
 
     # timing
     time_env = []
@@ -200,14 +202,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     # -----------------------------------------------------------------------------------
     # fill replay memory with random transitions
 
-    for ep in range(500):
+    for ep in range(50):
         # episode buffer
         tempbuffer.reset()
 
-        #environment
+        # environment reset and choose valid MDP
         env.reset()
-        preset_hidden_params = preset_parameters[hidden_idx(ep)]
-        env.param_set = preset_hidden_params
+        is_param_valid = 0
+        while not is_param_valid:
+            param_idx = np.random.randint(len(preset_parameters))
+            is_param_valid = valid_parameters_index[param_idx]
+
+        env.param_set = preset_parameters[param_idx]
+
         state = env.observe()
 
         for t in range(200):
@@ -221,10 +228,20 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # store experience in memory
             tempbuffer.add(new_experience)
 
+            # check if state is valid (logarithmic scale)
+            if np.any(state < -10):
+                is_param_valid = 0
+                break
+
             # update state
             state = next_state.copy()
 
-        fullbuffer.add(tempbuffer.buffer)
+        if is_param_valid:
+            # if trajectory has been valid -> append
+            fullbuffer.add(tempbuffer.buffer)
+        else:
+            # if has not been valid -> exclude parameters
+            valid_parameters_index[param_idx] = 0
 
     print('Replay Buffer Filled!')
 
@@ -233,9 +250,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     print("Episodes...")
     log.info('Loop over episodes')
     for episode in range(FLAGS.N_episodes):
-
-        # timing
-
 
         # count reward
         rw = []
@@ -251,13 +265,18 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # reset environment
             env.reset()
-            preset_hidden_params = preset_parameters[hidden_idx(episode)]
-            env.param_set = preset_hidden_params
+            is_param_valid = 0
+            while not is_param_valid:
+                param_idx = np.random.randint(len(preset_parameters))
+                is_param_valid = valid_parameters_index[param_idx]
+
+            env.param_set = preset_parameters[param_idx]
+
+            #
             state = env.observe()
 
             # loop steps
             step = 0
-            flag = True
 
             while step < FLAGS.L_episode:
 
@@ -273,6 +292,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 # store experience in memory
                 tempbuffer.add(new_experience)
 
+                # check if state is valid (logarithmic scale)
+                if np.any(state < -10):
+                    is_param_valid = 0
+                    break
+
                 # actual reward
                 if FLAGS.rew_log:
                     rw.append(np.exp(reward* FLAGS.rew_norm))
@@ -284,22 +308,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 state = next_state.copy()
                 step += 1
 
-                if episode % FLAGS.save_frequency < 6 and n == 0 and step == 0:
-                    generate_posterior_plots(sess, QNet, base_dir, episode, FLAGS.param_case, step)
-                    policy_plot(sess, QNet, tempbuffer, FLAGS, episode, FLAGS.param_case, step, base_dir)
-
-                # -----------------------------------------------------------------------
-            if flag:
-                # append episode buffer to large buffer
+            # -----------------------------------------------------------------------
+            if is_param_valid:
+                # if trajectory has been valid -> append
                 fullbuffer.add(tempbuffer.buffer)
+            else:
+                # if has not been valid -> exclude parameters
+                valid_parameters_index[param_idx] = 0
+                print('Remove instance '+ str(param_idx)+ ' from training set')
 
             # entropy of action selection
             _, action_count = np.unique(np.asarray(action_task), return_counts=True)
             action_prob = 1.*action_count / np.sum(action_count)
             entropy_episode.append(np.sum([-p*np.log(p) for p in action_prob if p != 0.]))
-
-            # state space coverage
-
 
         time_env.append(time.time() - start)
 
@@ -396,6 +417,14 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             evaluation_plots(sess, QNet, env, tempbuffer, FLAGS, summary_writer, noise_precision, episode, split_ratio, base_dir)
             value_function_plot(sess, QNet, tempbuffer, FLAGS, episode, base_dir)
+
+    print(valid_parameters_index)
+
+    updated_parameters = [preset_parameters[i] for i in range(len(preset_parameters)) if valid_parameters_index[i] == 1]
+
+    print(len(updated_parameters))
+    with open('./' + 'hiv_generated_hidden_params_update', 'wb') as f:
+        pickle.dump(updated_parameters, f)
 
 
     # write reward to file

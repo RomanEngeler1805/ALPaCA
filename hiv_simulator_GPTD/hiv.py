@@ -84,7 +84,7 @@ class HIVTreatment(object):
             self.state = baseline_state + (baseline_state * np.array([p_T1, p_T2, p_T1s, p_T2s, p_V, p_E])) # could scale the random perturbations to reduce their effect by multiplyting by d < 1
 
         # RE: perturb hidden state
-        self.param_set = {key: value for (key, value) in zip(self.perturb_params, np.zeros(12))}#np.random.normal(scale=0.1, size=12))}
+        self.param_set = {key: value for (key, value) in zip(self.perturb_params, np.random.normal(scale=0.1, size=12))}
 
 
     def observe(self):

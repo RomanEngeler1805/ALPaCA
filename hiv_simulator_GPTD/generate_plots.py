@@ -203,7 +203,10 @@ def evaluation_plots(sess,
                 state = next_state.copy()
                 step += 1
 
-            # -----------------------------------------------------------------------
+
+        #generate_posterior_plots(sess, QNet, base_dir, episode, i_eval, 0)
+        policy_plot(sess, QNet, buffer, FLAGS, episode, i_eval, 0, base_dir)
+        # -----------------------------------------------------------------------
 
         reward_tensorboard = np.mean(np.sum(Reward, axis=1))
 
@@ -331,7 +334,7 @@ def policy_plot(sess, QNet, buffer, FLAGS, episode, patient, step, base_dir):
     mesh = generate_mesh()
 
     #
-    Qmean = sess.run(QNet.Q1, feed_dict={QNet.state: mesh})
+    Qmean = sess.run(QNet.Qout, feed_dict={QNet.state: mesh})
     Policy = np.argmax(Qmean, axis=1)
 
     Policy[0:4] = np.arange(4)
