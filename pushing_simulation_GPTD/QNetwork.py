@@ -140,7 +140,6 @@ class QNetwork():
             self.Q = tf.einsum('lm,bl->b', self.w0_bar, phi_taken, name='Qtaken')
             self.Qnext = tf.einsum('lm,bla->ba', self.w0_bar, self.phi_next, name='Qnext')
 
-
         with tf.variable_scope("loss", reuse=tf.AUTO_REUSE):
             # Double Q learning
             self.max_action = tf.one_hot(tf.reshape(tf.argmax(self.Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32) # max action from Q network

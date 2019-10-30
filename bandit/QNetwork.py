@@ -124,8 +124,8 @@ class QNetwork():
         L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
         self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
-            self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
-            self.Qout = tf.einsum('lm,bla->ba', self.wt, self.phi, name='Qout')  # exploration
+        self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
+        self.Qout = tf.einsum('lm,bla->ba', self.wt, self.phi, name='Qout')  # exploration
 
         # posterior (analytical update) --------------------------------------------------
         context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)

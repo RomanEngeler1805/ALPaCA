@@ -343,6 +343,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # maximum speed of robot arm
             nstate = np.asarray(nstate)
+
             speed = np.linalg.norm(nstate[1:, :2] - nstate[:-1, :2], axis=1)
             max_speed.append(np.max(speed) * env.control_hz)
 
