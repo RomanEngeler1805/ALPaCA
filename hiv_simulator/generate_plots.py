@@ -168,10 +168,6 @@ def evaluation_plots(sess,
             env.param_set = preset_hidden_params
             state = env.observe()
 
-            # sample w from prior
-            sess.run([QNet.reset_post])
-            sess.run([QNet.sample_prior])
-
             # loop steps
             step = 0
 
@@ -193,7 +189,7 @@ def evaluation_plots(sess,
 
                 # logging
                 Qlog[ne, step] = np.max(Qval)
-                Rlog[ne, step] = rew_log
+                Rlog[ne, step] = reward
                 Vlog[ne, step] = state[4]
                 Elog[ne, step] = state[5]
 
@@ -203,41 +199,16 @@ def evaluation_plots(sess,
                 if done == 1:
                     break
 
-                if (step + 1) % FLAGS.update_freq_post == 0 and (step + 1) <= np.int(split_ratio * FLAGS.L_episode):
-                    reward_train = np.zeros([step + 1, ])
-                    state_train = np.zeros([step + 1, FLAGS.state_space])
-                    next_state_train = np.zeros([step + 1, FLAGS.state_space])
-                    action_train = np.zeros([step + 1, ])
-                    done_train = np.zeros([step + 1, 1])
-
-                    # fill arrays
-                    for k, experience in enumerate(buffer.buffer):
-                        # [s, a, r, s', a*, d]
-                        state_train[k] = experience[0]
-                        action_train[k] = experience[1]
-                        reward_train[k] = experience[2]
-                        next_state_train[k] = experience[3]
-                        done_train[k] = experience[4]
-
-                    # update
-                    _, _ = sess.run([QNet.w_assign, QNet.L_assign],
-                                    feed_dict={QNet.context_state: state_train,
-                                               QNet.context_action: action_train,
-                                               QNet.context_reward: reward_train,
-                                               QNet.context_state_next: next_state_train,
-                                               QNet.context_done: done_train,
-                                               QNet.nprec: noise_precision,
-                                               QNet.is_online: False})
-
-                    sess.run(QNet.sample_post)
-
                 # update state, and counters
                 state = next_state.copy()
                 step += 1
 
-            # -----------------------------------------------------------------------
 
-        reward_tensorboard = np.mean(np.sum(Rlog, axis=1))
+        #generate_posterior_plots(sess, QNet, base_dir, episode, i_eval, 0)
+        policy_plot(sess, QNet, buffer, FLAGS, episode, i_eval, 0, base_dir)
+        # -----------------------------------------------------------------------
+
+        reward_tensorboard = np.mean(np.sum(Reward, axis=1))
 
         # log to tensorboard
         reward_eval_summary = tf.Summary(
@@ -363,7 +334,7 @@ def policy_plot(sess, QNet, buffer, FLAGS, episode, patient, step, base_dir):
     mesh = generate_mesh()
 
     #
-    Qmean = sess.run(QNet.Q1, feed_dict={QNet.state: mesh})
+    Qmean = sess.run(QNet.Qout, feed_dict={QNet.state: mesh})
     Policy = np.argmax(Qmean, axis=1)
 
     Policy[0:4] = np.arange(4)
@@ -407,7 +378,7 @@ def value_function_plot(sess, QNet, buffer, FLAGS, episode, base_dir):
 
     mesh = generate_mesh()
 
-    Qprior = sess.run(QNet.Q0, feed_dict={QNet.state: mesh})
+    Qprior = sess.run(QNet.Qout, feed_dict={QNet.state: mesh})
     Vprior = np.max(Qprior, axis=1)
 
     plt.figure()

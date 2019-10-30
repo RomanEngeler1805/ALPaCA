@@ -15,11 +15,6 @@ def update_model(sess,
 
     # to accumulate the losses across the batches
     lossBuffer = 0
-    loss0Buffer = 0
-    loss1Buffer = 0
-    loss2Buffer = 0
-    lossregBuffer = 0
-    klBuffer = 0
 
     # to accumulate gradients
     gradBuffer = sess.run(QNet.tvars)  # get shapes of tensors
@@ -29,9 +24,6 @@ def update_model(sess,
 
     # Gradient descent
     for e in range(batch_size):
-
-        # probably not necessary: check
-        sess.run(QNet.reset_post)
 
         # sample from larger buffer [s, a, r, s', d] with current experience not yet included
         experience = buffer.sample(1)
@@ -58,12 +50,6 @@ def update_model(sess,
         train = np.arange(0, split)
         valid = np.arange(split, L_episode)
 
-        state_train = state_sample[train, :]
-        action_train = action_sample[train]
-        reward_train = reward_sample[train]
-        next_state_train = next_state_sample[train, :]
-        done_train = done_sample[train]
-
         state_valid = state_sample[valid, :]
         action_valid = action_sample[valid]
         reward_valid = reward_sample[valid]
@@ -73,42 +59,27 @@ def update_model(sess,
         # TODO: this part is very inefficient due to many session calls and processing data multiple times
         # select amax from online network
         amax_online = sess.run(QNet.max_action,
-                               feed_dict={QNet.context_state: state_train.reshape(-1, FLAGS.state_space),
-                                          QNet.context_action: action_train.reshape(-1),
-                                          QNet.context_reward: reward_train.reshape(-1),
-                                          QNet.context_state_next: next_state_train.reshape(-1, FLAGS.state_space),
-                                          QNet.context_done: done_train.reshape(-1, 1),
-                                          QNet.state: state_valid,
+                               feed_dict={QNet.state: state_valid,
                                           QNet.state_next: next_state_valid,
                                           QNet.nprec: noise_precision,
                                           QNet.is_online: False})
 
         # evaluate target model
-        phi_max_target, Qmax_target = sess.run([Qtarget.phi_max, Qtarget.Qmax],
-                                  feed_dict={Qtarget.context_state: state_train,
-                                             Qtarget.context_action: action_train,
-                                             Qtarget.context_reward: reward_train,
-                                             Qtarget.context_state_next: next_state_train,
-                                             Qtarget.state: state_valid,
+        Qmax_target = sess.run(Qtarget.Qmax,
+                                  feed_dict={Qtarget.state: state_valid,
                                              Qtarget.state_next: next_state_valid,
                                              Qtarget.amax_online: amax_online,
                                              Qtarget.nprec: noise_precision,
                                              QNet.is_online: False})
 
         # update model
-        grads, loss, loss0, loss1, loss2, lossreg, kl_prior_post, Qdiff = sess.run(
-            [QNet.gradients, QNet.loss, QNet.loss0, QNet.loss1, QNet.loss2, QNet.loss_reg, QNet.kl_prior_post, QNet.Qdiff],
-            feed_dict={QNet.context_state: state_train.reshape(-1, FLAGS.state_space),
-                       QNet.context_action: action_train.reshape(-1),
-                       QNet.context_reward: reward_train.reshape(-1),
-                       QNet.context_state_next: next_state_train.reshape(-1, FLAGS.state_space),
-                       QNet.context_done: done_train.reshape(-1, 1),
-                       QNet.state: state_valid,
+        grads, loss, Qdiff = sess.run(
+            [QNet.gradients, QNet.loss, QNet.Qdiff],
+            feed_dict={QNet.state: state_valid,
                        QNet.action: action_valid,
                        QNet.reward: reward_valid,
                        QNet.state_next: next_state_valid,
                        QNet.done: done_valid,
-                       QNet.phi_max_target: phi_max_target,
                        QNet.amax_online: amax_online,
                        QNet.Qmax_online: Qmax_target,
                        QNet.lr_placeholder: learning_rate,
@@ -121,11 +92,6 @@ def update_model(sess,
             gradBuffer[idx] += (grad[0] / batch_size)
 
         lossBuffer += loss
-        loss0Buffer += loss0
-        loss1Buffer += loss1
-        loss2Buffer += loss2
-        lossregBuffer += lossreg
-        klBuffer += kl_prior_post
 
     # update summary
     feed_dict = dictionary = dict(zip(QNet.gradient_holders, gradBuffer))
@@ -141,20 +107,10 @@ def update_model(sess,
         _, summaries_gradvar = sess.run([QNet.updateModel, QNet.summaries_gradvar], feed_dict=feed_dict)
 
         loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/Loss', simple_value=(lossBuffer / batch_size))])
-        loss0_summary = tf.Summary(value=[tf.Summary.Value(tag='Exploration-Exploitation/Bellmann Residual', simple_value=(loss0Buffer / batch_size))])
-        loss1_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/Loss1', simple_value=(loss1Buffer / batch_size))])
-        loss2_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/Loss2', simple_value=(loss2Buffer / batch_size))])
-        lossreg_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/Loss reg', simple_value=(lossregBuffer / batch_size))])
         coverage_summary = tf.Summary(value=[tf.Summary.Value(tag='Exploration-Exploitation/State Coverage', simple_value=volume_coverage)])
-        kldiv_summary = tf.Summary(value=[tf.Summary.Value(tag='Exploration-Exploitation/KL Posterior-Prior', simple_value=klBuffer)])
 
         summary_writer.add_summary(loss_summary, episode)
-        summary_writer.add_summary(loss0_summary, episode)
-        summary_writer.add_summary(loss1_summary, episode)
-        summary_writer.add_summary(loss2_summary, episode)
-        summary_writer.add_summary(lossreg_summary, episode)
         summary_writer.add_summary(coverage_summary, episode)
-        summary_writer.add_summary(kldiv_summary, episode)
         summary_writer.add_summary(summaries_gradvar, episode)
 
         summary_writer.flush()
