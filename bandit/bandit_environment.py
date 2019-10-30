@@ -28,7 +28,7 @@ class bandit_environment():
 
     def _sample_env(self):
         ''' resample theta '''
-        self.theta = self.mu + np.matmul(self.L, np.random.normal(size=self.action_dim)) # gaussian
+        self.theta = self.mu* np.ones(self.action_dim)# + np.matmul(self.L, np.random.normal(size=self.action_dim))
         self.phase = np.random.rand(self.action_dim)* np.pi/ 1.
 
     def _sample_state(self):
@@ -53,7 +53,9 @@ class bandit_environment():
         psi = self._psi(self.state, self.phase)[0]
 
         # randomly perturbed reward
-        r = np.dot(self.theta[action], psi[action])#+ 0.22* np.random.normal()
+        reward_all = np.einsum('i,i->i',self.theta, psi)
+        reward_agent = reward_all[action]#+ 0.22* np.random.normal()
+        reward_max = np.max(reward_all)
 
         d = 0
 
@@ -61,6 +63,6 @@ class bandit_environment():
         self._sample_state()
 
         # observe (untransformed) state and reward
-        obs = np.array([self.state.flatten(), r, d])
+        obs = np.array([self.state.flatten(), reward_agent, d, reward_max])
 
         return obs
