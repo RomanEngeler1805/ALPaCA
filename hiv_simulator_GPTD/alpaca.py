@@ -15,7 +15,7 @@ from matplotlib import ticker
 import pickle
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.25)
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 
 # General Hyperparameters
 # general
@@ -48,12 +48,12 @@ tf.flags.DEFINE_float("split_ratio_max", 0.0, "Maximum split ratio for condition
 tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
 # exploration
-tf.flags.DEFINE_float("eps_initial", 0.9, "Initial value for epsilon-greedy")
-tf.flags.DEFINE_float("eps_final", 0.05, "Final value for epsilon-greedy")
-tf.flags.DEFINE_float("eps_step", 0.999, "Multiplicative step for epsilon-greedy")
+tf.flags.DEFINE_float("eps_initial", 0.1, "Initial value for epsilon-greedy")
+tf.flags.DEFINE_float("eps_final", 0.1, "Final value for epsilon-greedy")
+tf.flags.DEFINE_float("eps_step", 0.9995, "Multiplicative step for epsilon-greedy")
 
 # target
-tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
+tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 # loss
@@ -166,6 +166,10 @@ log.info('Build Tensorflow Graph')
 # initialize environment
 env = HIVTreatment(rew_norm= FLAGS.rew_norm, rew_log=FLAGS.rew_log)
 
+# initialize
+learning_rate = FLAGS.learning_rate
+noise_precision = FLAGS.noise_precision
+
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     QNet = QNetwork(FLAGS, scope='QNetwork')  # neural network
     Qtarget = QNetwork(FLAGS, scope='TargetNetwork')
@@ -183,10 +187,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     summary_writer = tf.summary.FileWriter(logdir=os.path.join('./', 'summaries/', time.strftime('%H-%M-%d_%m-%y')),
                                            graph=sess.graph)
 
-    # initialize
-    learning_rate = FLAGS.learning_rate
-    noise_precision = FLAGS.noise_precision
-
     # report mean reward per episode
     reward_episode = []
 
@@ -202,7 +202,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     # -----------------------------------------------------------------------------------
     # fill replay memory with random transitions
 
-    for ep in range(50):
+    for ep in range(500):
         # episode buffer
         tempbuffer.reset()
 

@@ -50,6 +50,12 @@ def update_model(sess,
         train = np.arange(0, split)
         valid = np.arange(split, L_episode)
 
+        state_train = state_sample[train, :]
+        action_train = action_sample[train]
+        reward_train = reward_sample[train]
+        next_state_train = next_state_sample[train, :]
+        done_train = done_sample[train]
+
         state_valid = state_sample[valid, :]
         action_valid = action_sample[valid]
         reward_valid = reward_sample[valid]
@@ -65,7 +71,7 @@ def update_model(sess,
                                           QNet.is_online: False})
 
         # evaluate target model
-        Qmax_target = sess.run(Qtarget.Qmax,
+        Qmax_target, phi_max_target = sess.run([Qtarget.Qmax, Qtarget.phi_max],
                                   feed_dict={Qtarget.state: state_valid,
                                              Qtarget.state_next: next_state_valid,
                                              Qtarget.amax_online: amax_online,
@@ -75,12 +81,17 @@ def update_model(sess,
         # update model
         grads, loss, Qdiff = sess.run(
             [QNet.gradients, QNet.loss, QNet.Qdiff],
-            feed_dict={QNet.state: state_valid,
+            feed_dict={QNet.context_state: state_train,
+                       QNet.context_action: action_train,
+                       QNet.context_reward: reward_train,
+                       QNet.context_state_next: next_state_train,
+                       QNet.state: state_valid,
                        QNet.action: action_valid,
                        QNet.reward: reward_valid,
                        QNet.state_next: next_state_valid,
                        QNet.done: done_valid,
                        QNet.amax_online: amax_online,
+                       QNet.phi_max_target: phi_max_target,
                        QNet.Qmax_online: Qmax_target,
                        QNet.lr_placeholder: learning_rate,
                        QNet.nprec: noise_precision,
