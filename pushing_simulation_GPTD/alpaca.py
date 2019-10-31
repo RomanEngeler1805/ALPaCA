@@ -37,10 +37,10 @@ tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x
 
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 100., "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 100., "Maximum noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 1.0, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
-tf.flags.DEFINE_float("noise_precstep", 1.005, "Step of noise precision s*=ds")
+tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.5, "Initial split ratio for conditioning")
@@ -67,7 +67,7 @@ tf.flags.DEFINE_float("regularizer", 1e-2, "Regularization parameter") # X
 tf.flags.DEFINE_float("rew_norm", 1e0, "Normalization factor for reward")
 
 # memory
-tf.flags.DEFINE_integer("replay_memory_size", 30000, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 
@@ -149,7 +149,7 @@ policy_dir = base_dir + '/Policy/'
 create_dictionary(policy_dir)
 
 # initialize replay memory and model
-fullbuffer = prioritized_replay_buffer(FLAGS.replay_memory_size)  # large buffer to store all experience
+fullbuffer = replay_buffer(FLAGS.replay_memory_size)  # large buffer to store all experience
 tempbuffer = replay_buffer(FLAGS.L_episode)  # buffer for episode
 log.info('Build Tensorflow Graph')
 
@@ -216,13 +216,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
             # store experience in memory
             tempbuffer.add(new_experience)
-            fullbuffer.add(1e3, new_experience)
+            #fullbuffer.add(1e3, new_experience)
 
             # update state
             state = next_state.copy()
             step += 1
 
-        #fullbuffer.add(tempbuffer.buffer)
+        fullbuffer.add(tempbuffer.buffer)
 
     print('Replay Buffer Filled!')
 
@@ -295,7 +295,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                     # store experience in memory
                     tempbuffer.add(new_experience)
-                    fullbuffer.add(np.abs(nQold[step-nstep+1]- gamma**exponent* Qnew[action_new]- discounted_reward), new_experience)
+                    #fullbuffer.add(np.abs(nQold[step-nstep+1]- gamma**exponent* Qnew[action_new]- discounted_reward), new_experience)
 
                 # actual reward
                 rw.append(reward* FLAGS.rew_norm)
@@ -328,10 +328,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
                 # store experience in memory
                 tempbuffer.add(new_experience)
-                fullbuffer.add(np.abs(nQold[sstep - nstep + 1] - gamma ** exponent * Qnew[action_new] - discounted_reward), new_experience)
+                #fullbuffer.add(np.abs(nQold[sstep - nstep + 1] - gamma ** exponent * Qnew[action_new] - discounted_reward), new_experience)
 
             # append episode buffer to large buffer
-            #fullbuffer.add(tempbuffer.buffer)
+            fullbuffer.add(tempbuffer.buffer)
 
             # entropy of action selection
             _, action_count = np.unique(np.asarray(action_task), return_counts=True)
@@ -395,7 +395,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # ==================================================================================
         start = time.time()
 
-        for n_grad_steps in range(4):
+        for n_grad_steps in range(1):
             update_model(sess,
                          QNet,
                          Qtarget,
@@ -403,7 +403,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                          summary_writer,
                          FLAGS,
                          episode,
-                         batch_size=batch_size*30,
+                         batch_size=batch_size,
                          split_ratio=split_ratio,
                          learning_rate=learning_rate,
                          noise_precision=noise_precision)
@@ -411,7 +411,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         time_sgd.append(time.time()- start)
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-        if episode < 0:
+        if episode < 2:
             batch_size *= 2
 
         # learning rate schedule
