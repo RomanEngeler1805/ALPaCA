@@ -119,7 +119,6 @@ def generate_plots(sess, writer, base_dir, buffer, FLAGS, episode):
     state_train = np.zeros([trajectory_length, FLAGS.state_space])
     next_state_train = np.zeros([trajectory_length, FLAGS.state_space])
     action_train = np.zeros([trajectory_length, ])
-    exponent_train = np.zeros([trajectory_length, ])
     done_train = np.zeros([trajectory_length, 1])
 
     # fill arrays
@@ -129,8 +128,7 @@ def generate_plots(sess, writer, base_dir, buffer, FLAGS, episode):
         action_train[k] = experience[1]
         reward_train[k] = experience[2]
         next_state_train[k] = experience[3]
-        exponent_train[k] = experience[4]
-        done_train[k] = experience[5]
+        done_train[k] = experience[4]
 
 
     fig, ax = plt.subplots()
@@ -193,7 +191,6 @@ def policy_plot(sess, QNet, buffer, FLAGS, episode, base_dir):
     state_train = np.zeros([trajectory_length, FLAGS.state_space])
     next_state_train = np.zeros([trajectory_length, FLAGS.state_space])
     action_train = np.zeros([trajectory_length, ])
-    exponent_train = np.zeros([trajectory_length, ])
     done_train = np.zeros([trajectory_length, 1])
 
     # fill arrays
@@ -203,8 +200,7 @@ def policy_plot(sess, QNet, buffer, FLAGS, episode, base_dir):
         action_train[k] = experience[1]
         reward_train[k] = experience[2]
         next_state_train[k] = experience[3]
-        exponent_train[k] = experience[4]
-        done_train[k] = experience[5]
+        done_train[k] = experience[4]
 
     mesh = generate_mesh()
 

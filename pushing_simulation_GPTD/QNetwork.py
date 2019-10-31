@@ -51,15 +51,13 @@ class QNetwork():
 
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1_, num_outputs=self.hidden_dim, activation_fn=None,
                                                              weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                             weights_regularizer=tf.contrib.layers.l2_regularizer(
-                                                                 self.regularizer))
+                                                             weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden2 = self.activation(self.hidden2)
             hidden2 = tf.contrib.layers.layer_norm(hidden2)
 
             self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=None,
                                                              weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                             weights_regularizer=tf.contrib.layers.l2_regularizer(
-                                                                 self.regularizer))
+                                                             weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
 
             # bring it into the right order of shape [batch_size, latent_dim, action_dim]
             hidden3 = tf.reshape(self.hidden3, [-1, self.action_dim, self.latent_dim])
@@ -152,6 +150,39 @@ class QNetwork():
                 self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
         with tf.variable_scope("loss", reuse=tf.AUTO_REUSE):
+
+            '''
+            # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            en = tf.random_normal(shape=[bs, self.latent_dim])
+            Lt_inv_chol = tf.linalg.cholesky(self.Lt_inv)
+            wt_loss = tf.tile(tf.reshape(self.wt_bar, [1, -1]), [bs,1]) + tf.einsum('ij,bj->bi', Lt_inv_chol, en)
+
+            self.Qcurr = tf.einsum('bl,bl->b', wt_loss, phi_taken, name='Qtaken')
+            self.Qnext = tf.einsum('bl,bla->ba', wt_loss, self.phi_next, name='Qnext')
+
+            # Double Q learning
+            self.max_action = tf.one_hot(tf.reshape(tf.argmax(self.Qnext, axis=1), [-1, 1]), self.action_dim,
+                                         dtype=tf.float32)  # max action from Q network
+            self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
+            #
+            self.phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
+            self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='phimax_target')
+            #
+            self.Qmax = tf.einsum('im,bi->b', self.wt_bar, self.phi_max)
+            self.Qmax_online = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')  # Qmax into Q network
+
+            # Qtarget = r- Q(s,a)
+            self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_online)
+
+            # Bellmann residual
+            self.Qdiff = self.Qtarget - self.Qcurr
+
+            # tf.losses.huber_loss(labels, predictions, delta=100.)
+            self.loss = tf.reduce_logsumexp(tf.square(self.Qdiff))+\
+                        self.regularizer * tf.losses.get_regularization_loss(scope=self.scope)
+
+            # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            '''
             # Q values
             self.Qcurr = tf.einsum('lm,bl->b', self.wt_bar, phi_taken, name='Qtaken')
             self.Qnext = tf.einsum('lm,bla->ba', self.wt_bar, self.phi_next, name='Qnext')
@@ -187,6 +218,7 @@ class QNetwork():
 
             # tf.losses.huber_loss(labels, predictions, delta=100.)
             self.loss = self.loss1 + self.loss2 + self.regularizer * tf.losses.get_regularization_loss(scope=self.scope)
+
 
         # optimizer =====================================================================
         with tf.variable_scope("optimizer", reuse=tf.AUTO_REUSE):

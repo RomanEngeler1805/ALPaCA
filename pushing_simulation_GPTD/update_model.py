@@ -23,27 +23,25 @@ def update_model(sess,
 
 
     # Gradient descent
-    for e in range(1):
+    for e in range(batch_size):
 
         # sample from larger buffer [s, a, r, s', d] with current experience not yet included
-        experience, index,is_weight  = buffer.sample(batch_size)
+        experience  = buffer.sample(1)
 
-        L_episode = len(experience)
+        L_episode = len(experience[0])
 
         state_sample = np.zeros((L_episode, FLAGS.state_space))
         action_sample = np.zeros((L_episode,))
         reward_sample = np.zeros((L_episode,))
         next_state_sample = np.zeros((L_episode, FLAGS.state_space))
-        exponent_sample = np.zeros((L_episode,))
         done_sample = np.zeros((L_episode,))
 
         # fill arrays
-        for k, (s0, a, r, s1, ex, d) in enumerate(experience):
+        for k, (s0, a, r, s1, d) in enumerate(experience[0]):
             state_sample[k] = s0
             action_sample[k] = a
             reward_sample[k] = r
             next_state_sample[k] = s1
-            exponent_sample[k] = ex
             done_sample[k] = d
 
         # split into context and prediction set
@@ -56,24 +54,21 @@ def update_model(sess,
         action_train = action_sample[train]
         reward_train = reward_sample[train]
         next_state_train = next_state_sample[train, :]
-        exponent_train = exponent_sample[train]
         done_train = done_sample[train]
 
         state_valid = state_sample[valid, :]
         action_valid = action_sample[valid]
         reward_valid = reward_sample[valid]
         next_state_valid = next_state_sample[valid, :]
-        exponent_valid = exponent_sample[valid]
         done_valid = done_sample[valid]
 
         # TODO: this part is very inefficient due to many session calls and processing data multiple times
         # select amax from online network
         amax_online = sess.run(QNet.max_action,
                                feed_dict={QNet.context_state: state_train,
-                       QNet.context_action: action_train,
-                       QNet.context_reward: reward_train,
-                       QNet.context_state_next: next_state_train,
-                       QNet.context_exponent: exponent_train,
+                                          QNet.context_action: action_train,
+                                          QNet.context_reward: reward_train,
+                                          QNet.context_state_next: next_state_train,
                                           QNet.state: state_valid,
                                           QNet.state_next: next_state_valid,
                                           QNet.nprec: noise_precision,
@@ -82,10 +77,9 @@ def update_model(sess,
         # evaluate target model
         Qmax_target, phi_max_target = sess.run([Qtarget.Qmax, Qtarget.phi_max],
                                   feed_dict={Qtarget.context_state: state_train,
-                       Qtarget.context_action: action_train,
-                       Qtarget.context_reward: reward_train,
-                       Qtarget.context_state_next: next_state_train,
-                       Qtarget.context_exponent: exponent_train,
+                                             Qtarget.context_action: action_train,
+                                             Qtarget.context_reward: reward_train,
+                                             Qtarget.context_state_next: next_state_train,
                                              Qtarget.state: state_valid,
                                              Qtarget.state_next: next_state_valid,
                                              Qtarget.amax_online: amax_online,
@@ -99,12 +93,10 @@ def update_model(sess,
                        QNet.context_action: action_train,
                        QNet.context_reward: reward_train,
                        QNet.context_state_next: next_state_train,
-                       QNet.context_exponent: exponent_train,
                        QNet.state: state_valid,
                        QNet.action: action_valid,
                        QNet.reward: reward_valid,
                        QNet.state_next: next_state_valid,
-                       QNet.exponent: exponent_valid,
                        QNet.done: done_valid,
                        QNet.amax_online: amax_online,
                        QNet.phi_max_target: phi_max_target,
@@ -114,8 +106,8 @@ def update_model(sess,
                        QNet.is_online: False})
 
         # update prioritized replay
-        for idx in range(len(Qdiff)):
-            buffer.update(index[idx], np.abs(Qdiff[idx]))
+        #for idx in range(len(Qdiff)):
+        #    buffer.update(index[idx], np.abs(Qdiff[idx]))
 
         for idx, grad in enumerate(grads):  # grad[0] is gradient and grad[1] the variable itself
             gradBuffer[idx] += (grad[0] / batch_size)

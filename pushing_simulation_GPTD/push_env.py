@@ -78,7 +78,7 @@ class PushEnv(gym.Env):
                                                  [0., 0., 0.], self.robot_position, [0., 0., 0., 1.0], rot.as_quat())
 
         # object COM offset
-        offset = 0#0.025*(-1. + 2.* np.random.rand())
+        offset = 0.025*(-1. + 2.* np.random.rand())
         self.obj_offset_COM_local = np.array([0., offset])
 
         # reset velocity vector
@@ -115,7 +115,7 @@ class PushEnv(gym.Env):
             done = True
 
         # if robot moves too far away from object
-        if np.linalg.norm(obs[:2]- obs[4:6]) > 0.4* self.maxp:
+        if np.linalg.norm(obs[:2]- obs[4:6]) > 0.2* self.maxp:
             done = True
 
         # calculate reward
