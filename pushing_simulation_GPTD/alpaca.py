@@ -212,11 +212,10 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             next_state, reward, done, _ = env.step(action)
 
             # store experience in memory
-            new_experience = [state, action, reward, next_state, nstep, done]
+            new_experience = [state, action, reward, next_state, done]
 
             # store experience in memory
             tempbuffer.add(new_experience)
-            #fullbuffer.add(1e3, new_experience)
 
             # update state
             state = next_state.copy()
@@ -256,79 +255,56 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             step = 0
             done = False
 
-            # n-step reward
-            nreward = []
-            nstate = []
-            naction = []
-            nQold = []
-            discount_factor = np.asarray([gamma**t for t in range(0, nstep)])
+            #
+            speed_task = []
 
             while (step < FLAGS.L_episode) and (done == False):
 
                 # take a step
                 Qval = sess.run(QNet.Qout, feed_dict={QNet.state: state.reshape(-1,FLAGS.state_space)})[0]
                 action = eGreedyAction(Qval, eps)
-
                 next_state, reward, done, _ = env.step(action)
 
-                nstate.append(state)
-                nreward.append(reward)
-                naction.append(action)
-                nQold.append(Qval[action])
-
-                if step >= nstep-1:
-                    # store experience in memory
-                    # reward has different indices since for the prioritized replay a 0 is added
-                    discounted_reward = np.dot(discount_factor, np.asarray(nreward[step-nstep+1:]))
-
-                    exponent = nstep
-
-                    new_experience = [nstate[step-nstep+1],
-                                      naction[step-nstep+1],
-                                      discounted_reward,
-                                      next_state,
-                                      exponent,
-                                      done]
-
-                    Qnew = sess.run(QNet.Qout, feed_dict={QNet.state: next_state.reshape(-1,FLAGS.state_space)})[0]
-                    action_new = eGreedyAction(Qnew, eps)
-
-                    # store experience in memory
-                    tempbuffer.add(new_experience)
-                    #fullbuffer.add(np.abs(nQold[step-nstep+1]- gamma**exponent* Qnew[action_new]- discounted_reward), new_experience)
+                # store experience in memory
+                new_experience = [state, action, reward, next_state, done]
+                tempbuffer.add(new_experience)
 
                 # actual reward
-                rw.append(reward* FLAGS.rew_norm)
+                rw.append(reward)
                 action_task.append(action)
+                speed_task.append(np.linalg.norm(next_state[2:4]- state[2:4]))
 
                 # update state, and counters
                 state = next_state.copy()
                 step += 1
 
-                '''
-                if episode % FLAGS.save_frequency == 0 and n == 0 and step == 0:
-                    generate_posterior_plots(sess, QNet, base_dir, episode, FLAGS.param_case, step)
-                    policy_plot(sess, QNet, tempbuffer, FLAGS, episode, FLAGS.param_case, step, base_dir)
-                '''
+                # update posterior
+                if (step + 1) % FLAGS.update_freq_post == 0 and step < split_ratio* FLAGS.L_episode:
+                    reward_train = np.zeros([step + 1, ])
+                    state_train = np.zeros([step + 1, FLAGS.state_space])
+                    next_state_train = np.zeros([step + 1, FLAGS.state_space])
+                    action_train = np.zeros([step + 1, ])
+                    done_train = np.zeros([step + 1, ])
+
+                    # fill arrays
+                    for k, experience in enumerate(tempbuffer.buffer):
+                        # [s, a, r, s', a*, d]
+                        state_train[k] = experience[0]
+                        action_train[k] = experience[1]
+                        reward_train[k] = experience[2]
+                        next_state_train[k] = experience[3]
+                        done_train[k] = experience[4]
+
+                    # update
+                    _ = sess.run(QNet.sample_post,
+                                feed_dict={QNet.context_state: state_train,
+                                           QNet.context_action: action_train,
+                                           QNet.context_reward: reward_train,
+                                           QNet.context_state_next: next_state_train,
+                                           QNet.context_done: done_train,
+                                           QNet.nprec: noise_precision})
+
                 # -----------------------------------------------------------------------
-
-            upper_limit = np.min([step+ nstep- 1, FLAGS.L_episode+ nstep- 1])
-            for sstep in range(step, upper_limit):
-                discount_factor = np.asarray([gamma ** t for t in range(0, upper_limit- sstep)])
-                discounted_reward = np.dot(discount_factor, np.asarray(nreward[sstep - nstep + 1:]))
-
-                exponent = upper_limit - sstep
-
-                new_experience = [nstate[sstep - nstep + 1],
-                                  naction[sstep - nstep + 1],
-                                  discounted_reward,
-                                  next_state,
-                                  exponent,
-                                  done]
-
-                # store experience in memory
-                tempbuffer.add(new_experience)
-                #fullbuffer.add(np.abs(nQold[sstep - nstep + 1] - gamma ** exponent * Qnew[action_new] - discounted_reward), new_experience)
 
             # append episode buffer to large buffer
             fullbuffer.add(tempbuffer.buffer)
@@ -342,10 +318,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             target_distance.append(np.linalg.norm(env.target_position- state[4:6]))
 
             # maximum speed of robot arm
-            nstate = np.asarray(nstate)
-
-            speed = np.linalg.norm(nstate[1:, :2] - nstate[:-1, :2], axis=1)
-            max_speed.append(np.max(speed) * env.control_hz)
+            speed_task = np.asarray(speed_task)
+            max_speed.append(np.max(speed_task) * env.control_hz)
 
         time_env.append(time.time() - start)
 
@@ -369,7 +343,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             noise_summary = tf.Summary(
                 value=[tf.Summary.Value(tag='Parameters/Noise precision', simple_value=noise_precision)])
             act_entropy_summary = tf.Summary(
-                value=[tf.Summary.Value(tag='Exploration-Exploitation/Entropy action', simple_value=np.mean(np.asarray(entropy_episode)))])
+                value=[tf.Summary.Value(tag='Exploration-Exploitation/Entropy action',
+                                        simple_value=np.mean(np.asarray(entropy_episode)))])
             len_traj_summary = tf.Summary(
                 value=[tf.Summary.Value(tag='Exploration-Exploitation/Trajectory Length', simple_value=step)])
             summary_writer.add_summary(reward_summary, episode)

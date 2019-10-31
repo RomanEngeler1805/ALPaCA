@@ -80,7 +80,6 @@ class QNetwork():
             self.state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
             self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
             self.reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
-            self.exponent = tf.placeholder(shape=[None], dtype=tf.float32, name='exponent')
             self.done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
 
             # prepare action to concatenate after first hidden layer
@@ -103,8 +102,7 @@ class QNetwork():
                                                      name='next_state')  # input
             self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
             self.context_reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
-            self.context_exponent = tf.placeholder(shape=[None], dtype=tf.float32, name='exponent')
-            self.context_done = tf.placeholder(shape=[None, 1], dtype=tf.float32, name='done')
+            self.context_done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
 
             # append action s.t. it is an input to the network
             (bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
