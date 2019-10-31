@@ -37,19 +37,19 @@ tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x
 
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 0.1, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 100., "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 100., "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.005, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.0, "Maximum split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_float("split_ratio", 0.5, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.5, "Maximum split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 5, "Update frequency of posterior and sampling of new policy")
 
 # exploration
-tf.flags.DEFINE_float("eps_initial", 0.0, "Initial value for epsilon-greedy")
-tf.flags.DEFINE_float("eps_final", 0.0, "Final value for epsilon-greedy")
+tf.flags.DEFINE_float("eps_initial", 0.1, "Initial value for epsilon-greedy")
+tf.flags.DEFINE_float("eps_final", 0.1, "Final value for epsilon-greedy")
 tf.flags.DEFINE_float("eps_step", 0.9997, "Multiplicative step for epsilon-greedy")
 
 # target
@@ -366,6 +366,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 value=[tf.Summary.Value(tag='Parameters/Split ratio', simple_value=split_ratio)])
             epsilon_summary = tf.Summary(
                 value=[tf.Summary.Value(tag='Parameters/Epsilon ratio', simple_value=eps)])
+            noise_summary = tf.Summary(
+                value=[tf.Summary.Value(tag='Parameters/Noise precision', simple_value=noise_precision)])
             act_entropy_summary = tf.Summary(
                 value=[tf.Summary.Value(tag='Exploration-Exploitation/Entropy action', simple_value=np.mean(np.asarray(entropy_episode)))])
             len_traj_summary = tf.Summary(
@@ -375,6 +377,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             summary_writer.add_summary(speed_summary, episode)
             summary_writer.add_summary(split_ratio_summary, episode)
             summary_writer.add_summary(epsilon_summary, episode)
+            summary_writer.add_summary(noise_summary, episode)
             summary_writer.add_summary(learning_rate_summary, episode)
             summary_writer.add_summary(act_entropy_summary, episode)
             summary_writer.add_summary(len_traj_summary, episode)

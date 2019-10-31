@@ -69,14 +69,24 @@ def update_model(sess,
         # TODO: this part is very inefficient due to many session calls and processing data multiple times
         # select amax from online network
         amax_online = sess.run(QNet.max_action,
-                               feed_dict={QNet.state: state_valid,
+                               feed_dict={QNet.context_state: state_train,
+                       QNet.context_action: action_train,
+                       QNet.context_reward: reward_train,
+                       QNet.context_state_next: next_state_train,
+                       QNet.context_exponent: exponent_train,
+                                          QNet.state: state_valid,
                                           QNet.state_next: next_state_valid,
                                           QNet.nprec: noise_precision,
                                           QNet.is_online: False})
 
         # evaluate target model
         Qmax_target, phi_max_target = sess.run([Qtarget.Qmax, Qtarget.phi_max],
-                                  feed_dict={Qtarget.state: state_valid,
+                                  feed_dict={Qtarget.context_state: state_train,
+                       Qtarget.context_action: action_train,
+                       Qtarget.context_reward: reward_train,
+                       Qtarget.context_state_next: next_state_train,
+                       Qtarget.context_exponent: exponent_train,
+                                             Qtarget.state: state_valid,
                                              Qtarget.state_next: next_state_valid,
                                              Qtarget.amax_online: amax_online,
                                              Qtarget.nprec: noise_precision,
