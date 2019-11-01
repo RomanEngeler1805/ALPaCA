@@ -38,14 +38,14 @@ tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 1.0, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 0.01, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.5, "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.5, "Maximum split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 5, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0., "Maximum split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
 
 # exploration
 tf.flags.DEFINE_float("eps_initial", 0.1, "Initial value for epsilon-greedy")
@@ -200,15 +200,12 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         #environment
         state = env.reset()
 
-        # network
-        sess.run(QNet.sample_prior)
-
         step = 0
         done = False
 
         while (step < FLAGS.L_episode) and (done == False):
             #interact
-            action = np.random.randint(5)
+            action = np.random.randint(FLAGS.action_space)
             next_state, reward, done, _ = env.step(action)
 
             # store experience in memory
@@ -285,6 +282,8 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     next_state_train = np.zeros([step + 1, FLAGS.state_space])
                     action_train = np.zeros([step + 1, ])
                     done_train = np.zeros([step + 1, ])
+
+                    print('posterior update')
 
                     # fill arrays
                     for k, experience in enumerate(tempbuffer.buffer):
