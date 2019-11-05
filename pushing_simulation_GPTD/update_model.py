@@ -26,7 +26,7 @@ def update_model(sess,
     for e in range(batch_size):
 
         # sample from larger buffer [s, a, r, s', d] with current experience not yet included
-        experience  = buffer.sample(1)
+        experience, index, is_weight = buffer.sample(1)
 
         L_episode = len(experience[0])
 
@@ -49,6 +49,7 @@ def update_model(sess,
 
         train = np.arange(0, split)
         valid = np.arange(split, L_episode)
+        #valid = np.random.choice(valid, size=np.int(0.4* len(valid)), replace=False)
 
         state_train = state_sample[train, :]
         action_train = action_sample[train]
@@ -106,8 +107,9 @@ def update_model(sess,
                        QNet.is_online: False})
 
         # update prioritized replay
+        #buffer.update(index[0], np.sum(np.abs(Qdiff)))
         #for idx in range(len(Qdiff)):
-        #    buffer.update(index[idx], np.abs(Qdiff[idx]))
+        buffer.update(index[0], np.sum(np.abs(Qdiff))* split / L_episode) # XXX
 
         for idx, grad in enumerate(grads):  # grad[0] is gradient and grad[1] the variable itself
             gradBuffer[idx] += (grad[0] / batch_size)

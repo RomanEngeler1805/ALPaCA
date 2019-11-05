@@ -6,6 +6,7 @@ import tensorflow as tf
 import io
 
 maxp = 0.4
+action_dim = 5
 
 # Helper Functions Tensorflow ================================================
 def plot_to_image(figure):
@@ -143,7 +144,7 @@ def generate_plots(sess, writer, base_dir, buffer, FLAGS, episode):
     plt.close()
 
 
-def generate_posterior_plots(sess, QNet, base_dir, episode, patient, step):
+def generate_posterior_plots(sess, QNet, w, Linv, base_dir, buffer, FLAGS, episode, step):
     '''
     plot cut through value function
     '''
@@ -151,9 +152,25 @@ def generate_posterior_plots(sess, QNet, base_dir, episode, patient, step):
     Nx = 30
     Ny = 20
 
+    trajectory_length = len(buffer.buffer)
+    reward_train = np.zeros([trajectory_length, ])
+    state_train = np.zeros([trajectory_length, FLAGS.state_space])
+    next_state_train = np.zeros([trajectory_length, FLAGS.state_space])
+    action_train = np.zeros([trajectory_length, ])
+    done_train = np.zeros([trajectory_length, 1])
+
+    # fill arrays
+    for k, experience in enumerate(buffer.buffer):
+        # [s, a, r, s', a*, d]
+        state_train[k] = experience[0]
+        action_train[k] = experience[1]
+        reward_train[k] = experience[2]
+        next_state_train[k] = experience[3]
+        done_train[k] = experience[4]
+
     mesh = generate_mesh()
 
-    w, Linv, phi, = sess.run([QNet.wt_bar, QNet.Lt_inv, QNet.phi], feed_dict={QNet.state: mesh})
+    phi = sess.run(QNet.phi, feed_dict={QNet.state: mesh})
 
     Q = np.einsum('im,bia->ba', w, phi)
     dQ = np.einsum('bia,ij,bja->ba', phi, Linv, phi)
@@ -162,19 +179,35 @@ def generate_posterior_plots(sess, QNet, base_dir, episode, patient, step):
     Vpost = Q[np.arange(len(Q)), argmax_Q]
     dVpost = dQ[np.arange(len(Q)), argmax_Q]
 
-    fig, ax = plt.subplots(figsize=[8,4], ncols=2)
+    Policy = argmax_Q
+    Policy[0:action_dim] = np.arange(action_dim)
+
+    fig, ax = plt.subplots(figsize=[12,4], ncols=3)
+
     im = ax[0].imshow(Vpost.reshape(Ny, Nx), extent=[0, 8, 0, 4])  # (y, x)
     ax[0].set_title('Value mean')
-    ax[0].set_xlabel('V')
-    ax[0].set_ylabel('E')
+    ax[0].set_xlabel('x')
+    ax[0].set_ylabel('y')
     fig.colorbar(im, ax=ax[0], orientation="horizontal", pad=0.2)
+
     im = ax[1].imshow(dVpost.reshape(Ny, Nx), extent=[0, 8, 0, 4])  # (y, x)
     ax[1].set_title('Value std')
-    ax[1].set_xlabel('V')
-    ax[1].set_ylabel('E')
+    ax[1].set_xlabel('x')
+    ax[1].set_ylabel('y')
     fig.colorbar(im, ax=ax[1], orientation="horizontal", pad=0.2)
-    plt.savefig(Qposterior_dir + 'Episode_' + str(episode)+ '_patient_'+ str(patient)+ '_step_'+ str(step))
+
+
+    ax[2].imshow(Policy.reshape(Ny, Nx), extent=[0, maxp, 0., maxp])
+    ax[2].scatter(state_train[:, 4], state_train[:, 5])
+    ax[2].set_xlabel('x')
+    ax[2].set_ylabel('y')
+    ax[2].set_xlim([0, maxp])
+    ax[2].set_ylim([0, maxp])
+    fig.colorbar(im, ax=ax[2], boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5])
+
+    plt.savefig(Qposterior_dir + 'Episode_' + str(episode)+ '_step_'+ str(step))
     plt.close()
+
 
 
 def policy_plot(sess, QNet, buffer, FLAGS, episode, base_dir):
@@ -208,7 +241,7 @@ def policy_plot(sess, QNet, buffer, FLAGS, episode, base_dir):
     Qmean = sess.run(QNet.Qout, feed_dict={QNet.state: mesh})
     Policy = np.argmax(Qmean, axis=1)
 
-    Policy[0:5] = np.arange(5)
+    Policy[0:action_dim] = np.arange(action_dim)
 
     plt.figure()
     im = plt.imshow(Policy.reshape(Ny, Nx), extent=[0, maxp, 0., maxp]) # (y, x)

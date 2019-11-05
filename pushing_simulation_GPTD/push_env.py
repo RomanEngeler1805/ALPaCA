@@ -31,7 +31,7 @@ class PushEnv(gym.Env):
         self.high = np.r_[self.maxp, self.maxp, +self.maxv, +self.maxv, self.maxp, self.maxp]#, +self.maxv, +self.maxv]
 
         # parameters for the simulation
-        self.velocity_increment = 0.08
+        self.velocity_increment = 0.06
         self.control_hz = 30
         self.sim_hz = 240.
         self.max_force = 400 # force of manipulator
@@ -69,7 +69,7 @@ class PushEnv(gym.Env):
         # load manipulation object
         self.object_id = p.loadURDF("urdfs/cuboid1.urdf", [0.05, displacement, 0.01])
         # load manipulator
-        self.robot_position = np.r_[0.02, displacement+ 0.02*(-0.5 + np.random.rand()), 0.03]
+        self.robot_position = np.r_[0.02, displacement+ 0.02*(-0.5 + np.random.rand()), 0.03] # XXXX
         rot = Rotation.from_rotvec(np.r_[0.0, 1.0, 0.0] * 0.5 * np.pi)
         self.robot_id = p.loadURDF("urdfs/cylinder.urdf", self.robot_position, rot.as_quat())
 
@@ -154,6 +154,7 @@ if __name__ == '__main__':
     for i in range(30):
         # action = np.random.uniform(0.0, 1.0, (5,))
         action = [3 if step < 50 else 2][0]
+        obs, reward, _, _ = env.step(action)
         obs, reward, _, _ = env.step(action)
         step += 1
         track_arm.append(obs[:2])

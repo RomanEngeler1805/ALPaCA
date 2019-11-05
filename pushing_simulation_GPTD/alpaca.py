@@ -21,9 +21,9 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 # general
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
-tf.flags.DEFINE_integer("N_episodes", 15000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 14000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 25, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 35, "Length of episodes")
 
 # architecture
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
@@ -38,14 +38,14 @@ tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 0.01, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 0.01, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 1.0, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0., "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0., "Maximum split ratio for conditioning")
-tf.flags.DEFINE_integer("update_freq_post", 10, "Update frequency of posterior and sampling of new policy")
+tf.flags.DEFINE_float("split_ratio", 0.8, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.8, "Maximum split ratio for conditioning")
+tf.flags.DEFINE_integer("update_freq_post", 5, "Update frequency of posterior and sampling of new policy")
 
 # exploration
 tf.flags.DEFINE_float("eps_initial", 0.1, "Initial value for epsilon-greedy")
@@ -67,9 +67,9 @@ tf.flags.DEFINE_float("regularizer", 1e-2, "Regularization parameter") # X
 tf.flags.DEFINE_float("rew_norm", 1e0, "Normalization factor for reward")
 
 # memory
-tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
 
 #
 tf.flags.DEFINE_integer("random_seed", 2345, "Random seed for numpy and tensorflow")
@@ -83,7 +83,7 @@ tf.set_random_seed(FLAGS.random_seed)
 
 from push_env import PushEnv
 from QNetwork import QNetwork
-from generate_plots import generate_plots, value_function_plot, policy_plot#, generate_posterior_plots, policy_plot
+from generate_plots import generate_plots, value_function_plot, policy_plot, generate_posterior_plots#, policy_plot
 from update_model import update_model
 #
 from replay_buffer import replay_buffer
@@ -149,7 +149,7 @@ policy_dir = base_dir + '/Policy/'
 create_dictionary(policy_dir)
 
 # initialize replay memory and model
-fullbuffer = replay_buffer(FLAGS.replay_memory_size)  # large buffer to store all experience
+fullbuffer = prioritized_replay_buffer(FLAGS.replay_memory_size)  # large buffer to store all experience
 tempbuffer = replay_buffer(FLAGS.L_episode)  # buffer for episode
 log.info('Build Tensorflow Graph')
 
@@ -208,17 +208,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             action = np.random.randint(FLAGS.action_space)
             next_state, reward, done, _ = env.step(action)
 
+
             # store experience in memory
             new_experience = [state, action, reward, next_state, done]
 
             # store experience in memory
             tempbuffer.add(new_experience)
+            #fullbuffer.add(new_experience)
 
             # update state
             state = next_state.copy()
             step += 1
 
-        fullbuffer.add(tempbuffer.buffer)
+        fullbuffer.add(1e4, tempbuffer.buffer)
 
     print('Replay Buffer Filled!')
 
@@ -251,6 +253,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # loop steps
             step = 0
             done = False
+            td_accum = 0
 
             #
             speed_task = []
@@ -262,9 +265,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 action = eGreedyAction(Qval, eps)
                 next_state, reward, done, _ = env.step(action)
 
+
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
                 tempbuffer.add(new_experience)
+
+                # prioritized memory
+                Qnew = sess.run(QNet.Qout, feed_dict={QNet.state: next_state.reshape(-1, FLAGS.state_space)})[0]
+
+                #fullbuffer.add(new_experience)
+                #factor = np.min([FLAGS.L_episode* split_ratio, step]) / (1.* FLAGS.L_episode* split_ratio)
+                factor = 1.
+
+                td_accum += factor* np.abs(Qval[action]- reward - gamma* np.max(Qnew))
 
                 # actual reward
                 rw.append(reward)
@@ -282,8 +295,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     next_state_train = np.zeros([step + 1, FLAGS.state_space])
                     action_train = np.zeros([step + 1, ])
                     done_train = np.zeros([step + 1, ])
-
-                    print('posterior update')
 
                     # fill arrays
                     for k, experience in enumerate(tempbuffer.buffer):
@@ -303,10 +314,22 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                            QNet.context_done: done_train,
                                            QNet.nprec: noise_precision})
 
+                    if episode % FLAGS.save_frequency == 0:
+                        wt_bar, Lt_inv = sess.run([QNet.wt_bar, QNet.Lt_inv],
+                                                    feed_dict={QNet.context_state: state_train,
+                                                               QNet.context_action: action_train,
+                                                               QNet.context_reward: reward_train,
+                                                               QNet.context_state_next: next_state_train,
+                                                               QNet.context_done: done_train,
+                                                               QNet.nprec: noise_precision})
+                        generate_posterior_plots(sess, QNet, wt_bar, Lt_inv,
+                                                 base_dir, tempbuffer, FLAGS,
+                                                 episode, step)
+
                 # -----------------------------------------------------------------------
 
             # append episode buffer to large buffer
-            fullbuffer.add(tempbuffer.buffer)
+            fullbuffer.add(td_accum, tempbuffer.buffer)
 
             # entropy of action selection
             _, action_count = np.unique(np.asarray(action_task), return_counts=True)
@@ -369,7 +392,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # ==================================================================================
         start = time.time()
 
-        for n_grad_steps in range(1):
+        for n_grad_steps in range(4):
             update_model(sess,
                          QNet,
                          Qtarget,
@@ -389,7 +412,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             batch_size *= 2
 
         # learning rate schedule
-        if learning_rate > 5e-5:
+        if learning_rate > 5e-6:
             learning_rate /= FLAGS.lr_drop
 
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
