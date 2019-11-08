@@ -45,8 +45,8 @@ class QNetwork():
             hidden1 = self.activation(self.hidden1)
             hidden1 = tf.contrib.layers.layer_norm(hidden1) # [batch, hidden]
 
-            hidden1_ = tf.tile(tf.expand_dims(hidden1, axis=1), [1, 1, self.action_dim])
-            hidden1_ = tf.reshape(hidden1_, [-1, self.hidden_dim])
+            hidden1_ = tf.tile(tf.expand_dims(hidden1, axis=1), [1, 1, self.action_dim]) # |B|x|H|x|A|
+            hidden1_ = tf.reshape(hidden1_, [-1, self.hidden_dim]) # |B x A||H|
             hidden1_ = tf.concat([hidden1_, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1_, num_outputs=self.hidden_dim, activation_fn=None,
@@ -130,9 +130,11 @@ class QNetwork():
             # posterior (analytical update) --------------------------------------------------
             context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim,
                                               dtype=tf.float32)
+            context_taken_action = tf.tile(context_taken_action, [1, self.latent_dim, 1])
             self.context_phi_taken = tf.reduce_sum(tf.multiply(self.context_phi, context_taken_action), axis=2)
 
             taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
+            taken_action = tf.tile(taken_action, [1, self.latent_dim, 1])
             phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
 
             # update posterior if there is data
@@ -194,7 +196,8 @@ class QNetwork():
             self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='phimax_target')
             #
             self.Qmax = tf.einsum('im,bi->b', self.wt_bar, self.phi_max)
-            self.Qmax_online = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')  # Qmax into Q network
+            #self.Qmax_online = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')  # Qmax into Q network
+            self.Qmax_online = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
 
             # Qtarget = r- Q(s,a)
             self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_online)
@@ -314,10 +317,10 @@ class QNetwork():
             phi_hat = phi_taken - self.gamma * phi_max
 
             # update posterior distributior
-            wt_bar, Lt_inv = self._update_posterior(phi_hat, reward)
+            wt_bar, _ = self._update_posterior(phi_hat, reward)
 
             # determine phi(max_action) based on Q determined by sampling wt from posterior
-            Q_next = tf.einsum('i,jik->jk', tf.reshape(wt_bar, [-1]), phi_next)
+            Q_next = tf.einsum('i,bia->ba', tf.reshape(wt_bar, [-1]), phi_next)
             max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
             phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
 

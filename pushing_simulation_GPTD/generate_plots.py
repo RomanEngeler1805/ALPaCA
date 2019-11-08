@@ -8,6 +8,70 @@ import io
 maxp = 0.4
 action_dim = 5
 
+
+def evaluate_Q(QNet, buffer, env, sess, FLAGS, split_ratio, noise_precision):
+    # initialize buffer
+    buffer.reset()
+
+    # reset environment
+    state = env.reset()
+
+    # network
+    sess.run(QNet.sample_prior)
+
+    # loop steps
+    step = 0
+    done = False
+    reward_accum = 0
+
+    while (step < FLAGS.L_episode) and (done == False):
+
+        # take a step
+        Qval = sess.run(QNet.Qout, feed_dict={QNet.state: state.reshape(-1, FLAGS.state_space)})[0]
+        action = np.argmax(Qval)
+        next_state, reward, done, _ = env.step(action)
+
+        if not done and step < FLAGS.L_episode - 1:
+            reward *= 0
+
+        # store experience in memory
+        new_experience = [state, action, reward, next_state, done]
+        buffer.add(new_experience)
+
+        reward_accum += reward
+
+        # update state, and counters
+        state = next_state.copy()
+        step += 1
+
+        # update posterior
+        if (step + 1) % FLAGS.update_freq_post == 0 and step < split_ratio * FLAGS.L_episode:
+            reward_train = np.zeros([step + 1, ])
+            state_train = np.zeros([step + 1, FLAGS.state_space])
+            next_state_train = np.zeros([step + 1, FLAGS.state_space])
+            action_train = np.zeros([step + 1, ])
+            done_train = np.zeros([step + 1, ])
+
+            # fill arrays
+            for k, experience in enumerate(buffer.buffer):
+                # [s, a, r, s', a*, d]
+                state_train[k] = experience[0]
+                action_train[k] = experience[1]
+                reward_train[k] = experience[2]
+                next_state_train[k] = experience[3]
+                done_train[k] = experience[4]
+
+            # update
+            _ = sess.run(QNet.sample_post,
+                         feed_dict={QNet.context_state: state_train,
+                                    QNet.context_action: action_train,
+                                    QNet.context_reward: reward_train,
+                                    QNet.context_state_next: next_state_train,
+                                    QNet.context_done: done_train,
+                                    QNet.nprec: noise_precision})
+
+    return reward_accum
+
 # Helper Functions Tensorflow ================================================
 def plot_to_image(figure):
   """Converts the matplotlib plot specified by 'figure' to a PNG image and
@@ -197,13 +261,13 @@ def generate_posterior_plots(sess, QNet, w, Linv, base_dir, buffer, FLAGS, episo
     fig.colorbar(im, ax=ax[1], orientation="horizontal", pad=0.2)
 
 
-    ax[2].imshow(Policy.reshape(Ny, Nx), extent=[0, maxp, 0., maxp])
+    im = ax[2].imshow(Policy.reshape(Ny, Nx), extent=[0, maxp, 0., maxp])
     ax[2].scatter(state_train[:, 4], state_train[:, 5])
     ax[2].set_xlabel('x')
     ax[2].set_ylabel('y')
     ax[2].set_xlim([0, maxp])
     ax[2].set_ylim([0, maxp])
-    fig.colorbar(im, ax=ax[2], boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5])
+    fig.colorbar(im, ax=ax[2], boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5], orientation="horizontal", pad=0.2)
 
     plt.savefig(Qposterior_dir + 'Episode_' + str(episode)+ '_step_'+ str(step))
     plt.close()
@@ -246,11 +310,11 @@ def policy_plot(sess, QNet, buffer, FLAGS, episode, base_dir):
     plt.figure()
     im = plt.imshow(Policy.reshape(Ny, Nx), extent=[0, maxp, 0., maxp]) # (y, x)
     plt.scatter(state_train[:, 4], state_train[:, 5])
-    plt.xlabel('V')
-    plt.ylabel('E')
+    plt.xlabel('x')
+    plt.ylabel('y')
     plt.xlim([0, maxp])
     plt.ylim([0, maxp])
-    plt.colorbar(im, boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5])
+    plt.colorbar(im, boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5])
     plt.savefig(policy_dir+ 'Episode_'+ str(episode))
     plt.close()
 
