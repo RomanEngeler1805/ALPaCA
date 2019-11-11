@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mp
 import pickle
@@ -6,7 +8,7 @@ import tensorflow as tf
 import io
 
 maxp = 0.4
-action_dim = 5
+action_dim = 7
 
 
 def evaluate_Q(QNet, buffer, env, sess, FLAGS, split_ratio, noise_precision):
@@ -31,9 +33,6 @@ def evaluate_Q(QNet, buffer, env, sess, FLAGS, split_ratio, noise_precision):
         action = np.argmax(Qval)
         next_state, reward, done, _ = env.step(action)
 
-        if not done and step < FLAGS.L_episode - 1:
-            reward *= 0
-
         # store experience in memory
         new_experience = [state, action, reward, next_state, done]
         buffer.add(new_experience)
@@ -45,12 +44,12 @@ def evaluate_Q(QNet, buffer, env, sess, FLAGS, split_ratio, noise_precision):
         step += 1
 
         # update posterior
-        if (step + 1) % FLAGS.update_freq_post == 0 and step < split_ratio * FLAGS.L_episode:
-            reward_train = np.zeros([step + 1, ])
-            state_train = np.zeros([step + 1, FLAGS.state_space])
-            next_state_train = np.zeros([step + 1, FLAGS.state_space])
-            action_train = np.zeros([step + 1, ])
-            done_train = np.zeros([step + 1, ])
+        if (step) % FLAGS.update_freq_post == 0 and step < split_ratio * FLAGS.L_episode:
+            reward_train = np.zeros([step, ])
+            state_train = np.zeros([step, FLAGS.state_space])
+            next_state_train = np.zeros([step, FLAGS.state_space])
+            action_train = np.zeros([step, ])
+            done_train = np.zeros([step, ])
 
             # fill arrays
             for k, experience in enumerate(buffer.buffer):
@@ -267,7 +266,7 @@ def generate_posterior_plots(sess, QNet, w, Linv, base_dir, buffer, FLAGS, episo
     ax[2].set_ylabel('y')
     ax[2].set_xlim([0, maxp])
     ax[2].set_ylim([0, maxp])
-    fig.colorbar(im, ax=ax[2], boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5], orientation="horizontal", pad=0.2)
+    fig.colorbar(im, ax=ax[2], boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5], orientation="horizontal", pad=0.2)
 
     plt.savefig(Qposterior_dir + 'Episode_' + str(episode)+ '_step_'+ str(step))
     plt.close()
@@ -314,7 +313,7 @@ def policy_plot(sess, QNet, buffer, FLAGS, episode, base_dir):
     plt.ylabel('y')
     plt.xlim([0, maxp])
     plt.ylim([0, maxp])
-    plt.colorbar(im, boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5])
+    plt.colorbar(im, boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5])
     plt.savefig(policy_dir+ 'Episode_'+ str(episode))
     plt.close()
 

@@ -15,6 +15,7 @@ def update_model(sess,
 
     # to accumulate the losses across the batches
     lossBuffer = 0
+    lossregBuffer = 0
 
     # to accumulate gradients
     gradBuffer = sess.run(QNet.tvars)  # get shapes of tensors
@@ -88,8 +89,8 @@ def update_model(sess,
                                              QNet.is_online: False})
 
         # update model
-        grads, loss, Qdiff = sess.run(
-            [QNet.gradients, QNet.loss, QNet.Qdiff],
+        grads, loss, lossreg, Qdiff = sess.run(
+            [QNet.gradients, QNet.loss, QNet.loss_reg, QNet.Qdiff],
             feed_dict={QNet.context_state: state_train,
                        QNet.context_action: action_train,
                        QNet.context_reward: reward_train,
@@ -115,6 +116,7 @@ def update_model(sess,
             gradBuffer[idx] += (grad[0] / batch_size)
 
         lossBuffer += loss
+        lossregBuffer += lossreg
 
     # update summary
     feed_dict = dictionary = dict(zip(QNet.gradient_holders, gradBuffer))
@@ -128,11 +130,13 @@ def update_model(sess,
 
         # update summary
         _, summaries_gradvar = sess.run([QNet.updateModel, QNet.summaries_gradvar], feed_dict=feed_dict)
-
+        lossreg_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/Loss_Regularization', simple_value=(lossregBuffer / batch_size))])
         loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/Loss', simple_value=(lossBuffer / batch_size))])
+        
         coverage_summary = tf.Summary(value=[tf.Summary.Value(tag='Exploration-Exploitation/State Coverage', simple_value=volume_coverage)])
 
         summary_writer.add_summary(loss_summary, episode)
+        summary_writer.add_summary(lossreg_summary, episode)
         summary_writer.add_summary(coverage_summary, episode)
         summary_writer.add_summary(summaries_gradvar, episode)
 

@@ -196,17 +196,19 @@ class QNetwork():
             self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='phimax_target')
             #
             self.Qmax = tf.einsum('im,bi->b', self.wt_bar, self.phi_max)
-            #self.Qmax_online = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')  # Qmax into Q network
-            self.Qmax_online = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
+            self.Qmax_online = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')  # Qmax into Q network
+            #self.Qmax_online = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
 
             # Qtarget = r- Q(s,a)
             self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_online)
-
+            
             # Bellmann residual
             self.Qdiff = self.Qtarget - self.Qcurr
 
             #
+            #self.phi_hat = phi_taken - self.gamma * self.phi_max_target
             self.phi_hat = phi_taken - self.gamma * self.phi_max_target
+            
 
             Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat,
                                    name='Sigma_pred') + self.Sigma_e  # column vector
@@ -216,11 +218,11 @@ class QNetwork():
             self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff,
                                    name='loss1')
             self.loss2 = logdet_Sigma
+            self.loss_reg = tf.losses.get_regularization_loss(scope=self.scope)
 
             # tf.losses.huber_loss(labels, predictions, delta=100.)
-            self.loss = self.loss1 + self.loss2 + self.regularizer * tf.losses.get_regularization_loss(scope=self.scope)
-
-
+            self.loss = self.loss1 + self.loss2 + self.regularizer * self.loss_reg
+            
         # optimizer =====================================================================
         with tf.variable_scope("optimizer", reuse=tf.AUTO_REUSE):
             self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
