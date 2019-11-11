@@ -45,12 +45,12 @@ def evaluate_Q(QNet, buffer, env, sess, FLAGS, split_ratio, noise_precision):
         step += 1
 
         # update posterior
-        if (step + 1) % FLAGS.update_freq_post == 0 and step < split_ratio * FLAGS.L_episode:
-            reward_train = np.zeros([step + 1, ])
-            state_train = np.zeros([step + 1, FLAGS.state_space])
-            next_state_train = np.zeros([step + 1, FLAGS.state_space])
-            action_train = np.zeros([step + 1, ])
-            done_train = np.zeros([step + 1, ])
+        if (step) % FLAGS.update_freq_post == 0 and step < split_ratio * FLAGS.L_episode:
+            reward_train = np.zeros([step, ])
+            state_train = np.zeros([step, FLAGS.state_space])
+            next_state_train = np.zeros([step, FLAGS.state_space])
+            action_train = np.zeros([step, ])
+            done_train = np.zeros([step, ])
 
             # fill arrays
             for k, experience in enumerate(buffer.buffer):

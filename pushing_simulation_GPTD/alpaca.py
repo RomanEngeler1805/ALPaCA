@@ -20,7 +20,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 # General Hyperparameters
 # general
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
+tf.flags.DEFINE_float("gamma", 0.98, "Discount factor")
 tf.flags.DEFINE_integer("N_episodes", 10000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 35, "Length of episodes")
@@ -37,7 +37,7 @@ tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x
 
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 10, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 10.0, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
@@ -302,12 +302,12 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                              episode, step)
 
                 # update posterior
-                if (step + 1) % FLAGS.update_freq_post == 0 and step < split_ratio* FLAGS.L_episode:
-                    reward_train = np.zeros([step + 1, ])
-                    state_train = np.zeros([step + 1, FLAGS.state_space])
-                    next_state_train = np.zeros([step + 1, FLAGS.state_space])
-                    action_train = np.zeros([step + 1, ])
-                    done_train = np.zeros([step + 1, ])
+                if (step) % FLAGS.update_freq_post == 0 and step < split_ratio* FLAGS.L_episode:
+                    reward_train = np.zeros([step, ])
+                    state_train = np.zeros([step, FLAGS.state_space])
+                    next_state_train = np.zeros([step, FLAGS.state_space])
+                    action_train = np.zeros([step, ])
+                    done_train = np.zeros([step, ])
 
                     # fill arrays
                     for k, experience in enumerate(tempbuffer.buffer):
@@ -421,7 +421,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         time_sgd.append(time.time()- start)
 
         # increase the batch size after the first episode. Would allow N_tasks < batch_size due to buffer
-        if episode < 3:
+        if episode < 2:
             batch_size *= 2
 
         # learning rate schedule

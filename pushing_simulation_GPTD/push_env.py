@@ -65,11 +65,12 @@ class PushEnv(gym.Env):
 
         # displacement
         displacement = (0.2+ np.random.rand()* 0.6) * self.maxp
+        displacement_y = 0.+ 0.4* np.random.rand()* self.maxp
 
         # load manipulation object
-        self.object_id = p.loadURDF("urdfs/cuboid1.urdf", [0.05, displacement, 0.01])
+        self.object_id = p.loadURDF("urdfs/cuboid1.urdf", [displacement_y+ 0.05, displacement, 0.01])
         # load manipulator
-        self.robot_position = np.r_[0.02, displacement+ 0.02*(-0.5 + np.random.rand()), 0.03] # XXXX
+        self.robot_position = np.r_[displacement_y+ 0.02, displacement+ 0.02*(-0.5 + np.random.rand()), 0.03] # XXXX
         rot = Rotation.from_rotvec(np.r_[0.0, 1.0, 0.0] * 0.5 * np.pi)
         self.robot_id = p.loadURDF("urdfs/cylinder.urdf", self.robot_position, rot.as_quat())
 
@@ -78,7 +79,7 @@ class PushEnv(gym.Env):
                                                  [0., 0., 0.], self.robot_position, [0., 0., 0., 1.0], rot.as_quat())
 
         # object COM offset
-        offset = 0.025*(-1. + 2.* np.random.rand())
+        offset = 0.025*(-1. + 2.* np.random.rand()) # in y-direction in local coord frame
         self.obj_offset_COM_local = np.array([0., offset])
 
         # reset velocity vector
