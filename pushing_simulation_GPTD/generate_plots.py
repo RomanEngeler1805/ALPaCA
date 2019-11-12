@@ -162,8 +162,8 @@ def generate_mesh(Nx=30, Ny=20):
     vx_robot = vx * np.ones([Nx * Ny, 1])
     vy_robot = vy * np.ones([Nx * Ny, 1])
 
-    px_object = px_robot_mesh+ 0.02 # ~ radius
-    py_object = py_robot_mesh
+    px_object = np.zeros_like(px_robot_mesh)+ 0.02 # ~ radius
+    py_object = np.zeros_like(py_robot_mesh)
 
     mesh = np.concatenate([px_robot_mesh.reshape(-1, 1),
                            py_robot_mesh.reshape(-1, 1),
@@ -197,7 +197,8 @@ def generate_plots(sess, writer, base_dir, buffer, FLAGS, episode):
 
     fig, ax = plt.subplots()
     ax.scatter(state_train[:, 0], state_train[:, 1], color='b', marker='o')
-    ax.scatter(state_train[:, 4], state_train[:, 5], color='b', marker='s')
+    ax.scatter(state_train[:,0]+ state_train[:, 4],
+            state_train[:, 1]+ state_train[:, 5], color='b', marker='s')
     rect = mp.Rectangle((0, 0), maxp, maxp, edgecolor='b', linewidth=1, facecolor='none')
     ax.add_patch(rect)
     ax.scatter(0.8* maxp, 0.5* maxp, color='r')
@@ -261,7 +262,8 @@ def generate_posterior_plots(sess, QNet, w, Linv, base_dir, buffer, FLAGS, episo
 
 
     im = ax[2].imshow(Policy.reshape(Ny, Nx), extent=[0, maxp, 0., maxp])
-    ax[2].scatter(state_train[:, 4], state_train[:, 5])
+    ax[2].scatter(state_train[:, 0]+ state_train[:, 4],
+            state_train[:, 1]+ state_train[:, 5])
     ax[2].set_xlabel('x')
     ax[2].set_ylabel('y')
     ax[2].set_xlim([0, maxp])
@@ -308,7 +310,8 @@ def policy_plot(sess, QNet, buffer, FLAGS, episode, base_dir):
 
     plt.figure()
     im = plt.imshow(Policy.reshape(Ny, Nx), extent=[0, maxp, 0., maxp]) # (y, x)
-    plt.scatter(state_train[:, 4], state_train[:, 5])
+    plt.scatter(state_train[:, 0]+ state_train[:, 4],
+            state_train[:, 1]+ state_train[:, 5])
     plt.xlabel('x')
     plt.ylabel('y')
     plt.xlim([0, maxp])

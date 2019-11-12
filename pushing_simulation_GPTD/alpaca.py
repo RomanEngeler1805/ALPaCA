@@ -22,7 +22,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 # General Hyperparameters
 # general
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_float("gamma", 0.98, "Discount factor")
+tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
 tf.flags.DEFINE_integer("N_episodes", 13000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
@@ -45,8 +45,8 @@ tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N step
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.8, "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.8, "Maximum split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.85, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.85, "Maximum split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 5, "Update frequency of posterior and sampling of new policy")
 
 # exploration
@@ -55,7 +55,7 @@ tf.flags.DEFINE_float("eps_final", 0., "Final value for epsilon-greedy")
 tf.flags.DEFINE_float("eps_step", 0.9997, "Multiplicative step for epsilon-greedy")
 
 # target
-tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
+tf.flags.DEFINE_float("tau", 0.003, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 # loss
@@ -71,7 +71,7 @@ tf.flags.DEFINE_float("rew_norm", 1e0, "Normalization factor for reward")
 # memory
 tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 300, "Store images every N-th episode")
 
 #
 tf.flags.DEFINE_integer("random_seed", 2345, "Random seed for numpy and tensorflow")
@@ -345,7 +345,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             entropy_episode.append(np.sum([-p*np.log(p) for p in action_prob if p != 0.]))
 
             # final distance to target
-            target_distance.append(np.linalg.norm(env.target_position- state[4:6]))
+            target_distance.append(np.linalg.norm(env.target_position- state[:2]- state[4:6]))
 
             # maximum speed of robot arm
             speed_task = np.asarray(speed_task)
@@ -450,7 +450,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # print to console
         if episode % FLAGS.save_frequency == 0:
 
-            Neval = 10
+            Neval = 50
             reward_eval = 0.
             for n in range(Neval):
                 reward_eval+= evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, split_ratio, noise_precision)
