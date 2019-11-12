@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import time
 import logging
 import sys
+import pandas as pd
 
 def main():
     # TODO change to Flags arguments
@@ -17,7 +18,7 @@ def main():
     # TODO plot trajectories for inspection
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_eps', type=int, default=int(1e5), help='training episodes')
-    parser.add_argument('--test_eps', type=int, default=1000, help='test episodes')
+    parser.add_argument('--test_eps', type=int, default=500, help='test episodes')
     parser.add_argument('--seed', type=int, default=1, help='experiment seed')
 
     # Training Hyperparameters
@@ -56,6 +57,10 @@ def main():
     if not os.path.exists(V2dir):
         os.makedirs(V2dir)
 
+    reward_dir = 'figures/' + time.strftime('%H-%M-%d_%m-%y') + '/'
+    if not os.path.exists(reward_dir):
+        os.makedirs(reward_dir)
+
     # environment
     env = bandit_environment(args.action_space)
     eval_env = bandit_environment(args.action_space)
@@ -74,10 +79,10 @@ def main():
     # analysis
     save_iter = args.train_eps // 20
     average_returns = []
-    average_regret = []
-    average_subopt = []
 
-    #
+    # report mean reward per episode
+    reward_write_to_file = []
+    regret_write_to_file = []
 
     # episodes
     for ep in range(args.train_eps):
@@ -93,6 +98,11 @@ def main():
         rew = 0
         value = 0
 
+        # count reward
+        reward_agent = []
+        reward_opt = []
+        reward_rand = []
+
         ep_X.append(0)
         ep_A.append(action)
         ep_V.append(value)
@@ -103,7 +113,7 @@ def main():
         # inner loop
         while step < 40:
             action, value = algo.get_actions(obs[None], np.array(action).reshape(-1), np.array(rew).reshape(-1))
-            new_obs, rew, done, rew_max = env._step(action)
+            new_obs, rew, done, rew_max, rew_rand = env._step(action)
             track_R += rew
 
             ep_X.append(obs)
@@ -115,8 +125,21 @@ def main():
             obs = new_obs.copy()
 
             step += 1
+
+            # count reward
+            reward_agent.append(rew)
+            reward_opt.append(rew_max)
+            reward_rand.append(rew_rand)
+
             if done == True:
                 break
+
+        #
+        regret = (np.sum(np.asarray(reward_opt)) - np.sum(np.asarray(reward_agent))) / \
+                 (np.sum(np.asarray(reward_opt)) - np.sum(np.asarray(reward_rand)))
+
+        regret_write_to_file.append(regret)  # no need to divide by #tasks
+        reward_write_to_file.append(np.sum(np.asarray(reward_agent)))
 
         # preparing training inputs
         _, last_value = algo.get_actions(obs[None], np.array(action).reshape(-1), np.array(rew).reshape(-1))
@@ -181,42 +204,88 @@ def main():
 
         # training
         algo.reset()
-        _ = algo.train(ep_X=ep_X.reshape(-1,1), ep_A=ep_A, ep_R=ep_R, ep_adv=ep_adv, episode=ep)
+        _ = algo.train(ep_X=ep_X.reshape(-1,1),
+                       ep_A=ep_A,
+                       ep_R=ep_R,
+                       ep_adv=ep_adv,
+                       ep_Regret=regret,
+                       episode=ep)
         average_returns.append(track_R)
 
 
+        if ep % 5000 == 0:
+            # evaluation =================================================================
+            print('Evaluation ===================')
+            # cumulative regret
+            cumulative_regret = []
 
-    # evaluation =================================================================
-    print('')
-    test_regrets = []; test_rewards = []
-    for test_ep in range(args.test_eps):
-        env._sample_env()
-        obs = env._sample_state().copy()
+            # simple regret
+            simple_regret = []
 
-        algo.reset()
-        done = False
-        track_R = 0
 
-        step = 0
-        action = 0
-        rew = 0
+            for test_ep in range(args.test_eps):
+                # new environment
+                env._sample_env()
+                obs = env._sample_state().copy()
+                # reset hidden states
+                algo.reset()
+                # initialize
+                step = 0
+                action = 0
+                rew = 0
 
-        # inner loop
-        while step < 40:
+                # inner loop (cumulative regret)
+                reward_agent = 0
+                reward_max = 0
+                reward_rand = 0
 
-            action, value = algo.get_actions(obs[None], np.array(action).reshape(-1), np.array(rew).reshape(-1))
-            new_obs, rew, done, rew_max = eval_env._step(action)
-            obs = new_obs.copy()
-            track_R += rew
+                while step < 40:
 
-            if done == True:
-                break
+                    action, value = algo.get_actions(obs[None], np.array(action).reshape(-1), np.array(rew).reshape(-1))
+                    new_obs, rew, done, rew_max, rew_rand = eval_env._step(action)
+                    obs = new_obs.copy()
+                    step+= 1
 
-            step+= 1
+                    # rewards
+                    reward_agent += rew
+                    reward_max += rew_max
+                    reward_rand += rew_rand
 
-        test_rewards.append(track_R)
-    print('Mean Test Reward: {}'.format(np.mean(test_rewards[:])))
-    print('Mean Test Reward: {}'.format(np.mean(np.array(test_rewards[:]))))
+                cumulative_regret.append((reward_max- reward_agent)/ (reward_max- reward_rand))
+
+                # no updates to hidden state (simple regret)
+                reward_agent = 0
+                reward_max = 0
+                reward_rand = 0
+
+                for _ in range(40):
+                    action, value = algo.evaluate(obs[None], np.array(action).reshape(-1), np.array(rew).reshape(-1))
+                    new_obs, rew, done, rew_max, rew_rand = eval_env._step(action)
+                    obs = new_obs.copy()
+
+                    # rewards
+                    reward_agent += rew
+                    reward_max += rew_max
+                    reward_rand += rew_rand
+
+                simple_regret.append((reward_max- reward_agent)/ (reward_max- reward_rand))
+
+            print('Mean Cumulative Regret: {}'.format(np.mean(np.asarray(cumulative_regret))))
+            print('Mean Simple Regret: {}'.format(np.mean(np.asarray(simple_regret))))
+
+            file = open(reward_dir + 'test_regret_per_episode', 'a')
+            file.write('Episode'+ str(ep)+ ' =======================\n')
+            file.write('Cumulative Regret\n')
+            file.write('{:3.4f}% +- {:2.4f}%\n'.format(np.mean(np.asarray(cumulative_regret)), np.std(np.asarray(cumulative_regret))))
+            file.write('Simple Regret\n')
+            file.write('{:3.4f}% +- {:2.4f}%\n'.format(np.mean(np.asarray(simple_regret)), np.std(np.asarray(simple_regret))))
+            file.close()
+
+    df = pd.DataFrame(reward_write_to_file)
+    df.to_csv(reward_dir + 'reward_per_episode', index=False)
+
+    df = pd.DataFrame(regret_write_to_file)
+    df.to_csv(reward_dir + 'regret_per_episode', index=False)
 
 if __name__=='__main__':
     main()

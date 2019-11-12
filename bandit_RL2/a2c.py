@@ -33,6 +33,7 @@ class A2C:
         self.ADV = tf.placeholder(tf.float32, [None])
         self.A = tf.placeholder(tf.int32,   [None])
         self.R = tf.placeholder(tf.float32, [None])
+        self.Regret = tf.placeholder(tf.float32, [])
 
         self.Aold = tf.placeholder(tf.int32,   [None])
         self.Rold = tf.placeholder(tf.float32,   [None])
@@ -106,7 +107,7 @@ class A2C:
     def save_policy(self):
         pass
 
-    def train(self, ep_X, ep_A, ep_R, ep_adv, episode):
+    def train(self, ep_X, ep_A, ep_R, ep_adv, ep_Regret, episode):
         # train network
         # TODO implement baseline
         # TODO TRPO optimizer
@@ -114,8 +115,13 @@ class A2C:
         # TODO GRU cells
         self.step_size*= 0.99995
 
-        train_dict = {self.X: ep_X[1:], self.ADV: ep_adv[1:], self.A: ep_A[1:], self.R: ep_R[1:],
-                      self.Aold: ep_A[:-1], self.Rold: ep_R[:-1]}
+        train_dict = {self.X: ep_X[1:],
+                      self.ADV: ep_adv[1:],
+                      self.A: ep_A[1:],
+                      self.R: ep_R[1:],
+                      self.Regret: ep_Regret,
+                      self.Aold: ep_A[:-1],
+                      self.Rold: ep_R[:-1]}
         if self.policy.recurrent:
             train_dict[self.policy.c_in] = self.policy.c_init
             train_dict[self.policy.h_in] = self.policy.h_init
@@ -137,13 +143,15 @@ class A2C:
             entropy_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/entropy', simple_value=entropy)])
             vLoss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/vLoss', simple_value=vLoss)])
             loss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/loss', simple_value=loss)])
-            reward_summary = tf.Summary(value=[tf.Summary.Value(tag='reward', simple_value=np.sum(ep_R)* 2.)])
+            reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/reward', simple_value=np.sum(ep_R)* 2.)])
+            regret_summary = tf.Summary(value=[tf.Summary.Value(tag='Performance/regret', simple_value=ep_Regret)])
             self.summary_writer.add_summary(summaries_gradvar, episode)
             self.summary_writer.add_summary(pLoss_summary, episode)
             self.summary_writer.add_summary(vLoss_summary, episode)
             self.summary_writer.add_summary(entropy_summary, episode)
             self.summary_writer.add_summary(loss_summary, episode)
             self.summary_writer.add_summary(reward_summary, episode)
+            self.summary_writer.add_summary(regret_summary, episode)
             self.summary_writer.flush()
 
         info = {}
@@ -151,11 +159,3 @@ class A2C:
         info['value_loss'] = vLoss
         info['policy_entropy'] = ent
         return info
-
-    def observe_V(self, X, A, R):
-        train_dict = {self.X: X, self.Aold: A, self.Rold: R}
-        train_dict[self.policy.c_in] = self.policy.c_init
-        train_dict[self.policy.h_in] = self.policy.h_init
-        V = self.session.run(self.policy.V, feed_dict=train_dict)
-
-        return V
