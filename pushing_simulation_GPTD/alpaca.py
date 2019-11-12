@@ -55,7 +55,7 @@ tf.flags.DEFINE_float("eps_final", 0., "Final value for epsilon-greedy")
 tf.flags.DEFINE_float("eps_step", 0.9997, "Multiplicative step for epsilon-greedy")
 
 # target
-tf.flags.DEFINE_float("tau", 0.003, "Update speed of target network")
+tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 # loss
