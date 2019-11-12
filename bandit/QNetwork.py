@@ -6,11 +6,12 @@ class QNetwork():
         self.action_dim = FLAGS.action_space
         self.state_dim = FLAGS.state_space
         self.hidden_dim = FLAGS.hidden_space
-        self.latent_dim = FLAGS.latent_space
         self.cprec = FLAGS.prior_precision
         self.lr = FLAGS.learning_rate
         self.regularizer = FLAGS.regularizer
         self.iter_amax = FLAGS.iter_amax
+        self.grad_clip = FLAGS.grad_clip
+        self.huber_d = FLAGS.huber_d
         self.scope = scope
 
         # activation function
@@ -27,15 +28,14 @@ class QNetwork():
             # build graph
             self._build_model()
 
-    def model(self, x, a):
+    def model(self, x):
         ''' Embedding into latent space '''
-        with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
+        with tf.variable_scope("encoding", reuse=tf.AUTO_REUSE):
             # model architecture
             self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
+                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden1 = self.activation(self.hidden1)
             #hidden1 = tf.contrib.layers.layer_norm(hidden1)
-            hidden1 = tf.concat([hidden1, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
@@ -43,56 +43,19 @@ class QNetwork():
             hidden2 = self.activation(self.hidden2)
             #hidden2 = tf.contrib.layers.layer_norm(hidden2)
 
-            # single head
-            hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=None,
+            self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.action_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
 
-            # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
-            hidden3_rs = tf.reshape(hidden3, [-1, self.action_dim, self.latent_dim])
-            hidden3_rs = tf.transpose(hidden3_rs, [0, 2, 1])
-
-        return hidden3_rs
-
-
-    def state_trafo(self, state, action):
-        ''' append action to the state '''
-        state = tf.expand_dims(state, axis=1)
-        state = tf.tile(state, [1, 1, self.action_dim])
-        state = tf.reshape(state, [-1, self.state_dim])
-
-        # action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
-
-        # state = tf.concat([state, action], axis = 1)
-
-        return state
-
+        return self.hidden3
 
     def _build_model(self):
         ''' constructing tensorflow model '''
-        #
+        # hyperparameter
         self.lr_placeholder = tf.placeholder(shape=[], dtype=tf.float32, name='learning_rate')
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
-        #self.cprec = tf.placeholder(shape=[], dtype=tf.float32, name='cprec')
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
-
-        # placeholders context data =======================================================
-        self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
-        self.context_state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
-        self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
-        self.context_done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
-        self.context_reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
-
-        # append action s.t. it is an input to the network
-        (bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
-        context_action_augm = tf.range(self.action_dim, dtype=tf.int32)
-        context_action_augm = tf.tile(context_action_augm, [bsc])
-        context_state = self.state_trafo(self.context_state, context_action_augm)
-        context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
-
-        # latent representation
-        self.context_phi = self.model(context_state, context_action_augm)  # latent space
-        self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
+        self.is_online = tf.placeholder_with_default(False, shape=[], name='is_online')
 
         # placeholders predictive data ====================================================
         ## prediction data
@@ -104,92 +67,36 @@ class QNetwork():
 
         # append action s.t. it is an input to the network
         (bs, _) = tf.unstack(tf.to_int32(tf.shape(self.state)))
-        action_augm = tf.range(self.action_dim, dtype=tf.int32)
-        action_augm = tf.tile(action_augm, [bs])
-        state = self.state_trafo(self.state, action_augm)
-        state_next = self.state_trafo(self.state_next, action_augm)
 
         # latent representation
-        self.phi = self.model(state, action_augm) # latent space
-        self.phi_next = self.model(state_next, action_augm)  # latent space
-
-        # noise variance
-        self.Sigma_e_context = 1. / self.nprec * tf.ones(bsc, name='noise_precision')
-        self.Sigma_e = 1. / self.nprec * tf.ones(bs, name='noise_precision')
-
-        # output layer (Bayesian) =========================================================
-        # prior (updated via GD) ---------------------------------------------------------
-        self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
-        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
-        L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
-        self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
-
-        self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
-        self.Qout = tf.einsum('lm,bla->ba', self.wt, self.phi, name='Qout')  # exploration
+        self.Q = self.model(self.state) # latent space
+        self.Qnext = self.model(self.state_next)  # latent space
 
         # posterior (analytical update) --------------------------------------------------
-        context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
-        self.context_phi_taken = tf.reduce_sum(tf.multiply(self.context_phi, context_taken_action), axis=2)
-
-        taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
-        phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
-
-        # update posterior if there is data
-        self.wt_bar, self.Lt_inv = tf.cond(bsc > 0,
-                                           lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken,
-                                                                       self.context_reward),
-                                           lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
-
-        self.sample_prior = self._sample_prior()
-        # sample posterior
-        with tf.control_dependencies([self.wt_bar, self.Lt_inv]):
-            self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
+        taken_action = tf.one_hot(self.action, self.action_dim, dtype=tf.float32)
 
         # loss function ==================================================================
-        # current state -------------------------------------
-        self.Q = tf.einsum('im,bi->b', self.wt_bar, phi_taken, name='Q')
+        self.Qout = tf.identity(self.Q) # for only exploration
 
-        # next state ----------------------------------------
-        Qnext = tf.einsum('jm,bjk->bk', self.wt_bar, self.phi_next, name='Qnext')
-        self.max_action = tf.one_hot(tf.reshape(tf.argmax(Qnext, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
+        self.Q = tf.reduce_sum(tf.multiply(self.Q, taken_action), axis=1)
 
-        #self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
-        self.phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.max_action), axis=2)
+        # Double Q learning
+        self.max_action = tf.reshape(tf.argmax(self.Qnext, axis=1), [-1]) # max action from Q network
+        self.amax_online = tf.placeholder(shape=[None], dtype=tf.int32, name='amax_online') # amax into Target network
+        #
+        self.Qmax = tf.reduce_sum(tf.multiply(self.Qnext, tf.one_hot(self.amax_online, self.action_dim)), axis=1) # Qmax from target network
+        #
+        self.Qmax_online = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target') # Qmax into Q network
+        # Qtarget = r- Q(s,a)
+        self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_online)
 
-        #self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='Qmax_target')
-        '''
-        phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.max_action), axis=2)
-        phi_max = tf.einsum('b,ba->ba', (tf.ones(bs, ) - self.done), phi_max)
-        phi_max = tf.stop_gradient(phi_max)
-        '''
-
-        self.Qmax_target = tf.einsum('im,bi->b', self.wt_bar, self.phi_max)
-
-        self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_target)
-
-        # Q(s',a*)+ r- Q(s,a)
+        # Bellmann residual
         self.Qdiff = self.Qtarget - self.Q
 
-        # predictive covariance
-
-        self.phi_hat = phi_taken - self.gamma * self.phi_max
-
-        Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat,
-                               name='Sigma_pred') + self.Sigma_e  # column vector
-        logdet_Sigma = tf.reduce_sum(tf.log(Sigma_pred))
-
         # loss
-        self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
-        self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
-        self.loss2 = logdet_Sigma
+        self.loss = tf.einsum('b,b->', self.Qdiff, self.Qdiff, name='loss0')+ self.regularizer* tf.losses.get_regularization_loss(scope=self.scope)
 
-        self.loss_reg = tf.losses.get_regularization_loss()  # + tf.nn.l2_loss(self.hidden5_W)+\
-        # tf.nn.l2_loss(self.w0_bar)+ tf.nn.l2_loss(self.L0)
-
-
-        self.loss = self.loss1 + self.loss2 + self.regularizer * (self.loss_reg)
-
-        # optimizer
+        # optimizer =====================================================================
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)
 
         self.tvars = tf.trainable_variables(scope=self.scope)  # [v for v in tf.trainable_variables() if v.name!='QNetwork/L0_asym:0']
@@ -201,8 +108,8 @@ class QNetwork():
             self.gradient_holders.append(placeholder)
 
         # symbolic gradient of loss w.r.t. tvars
-        self.gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
-        #self.gradients = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gradients]
+        gradients = self.optimizer.compute_gradients(self.loss, self.tvars)
+        self.gradients = [(tf.clip_by_value(grad, -self.grad_clip, self.grad_clip), var) for grad, var in gradients]
 
         #
         self.updateModel = self.optimizer.apply_gradients(zip(self.gradient_holders, self.tvars))
@@ -220,9 +127,13 @@ class QNetwork():
 
         # Keep track of gradient values
         grad_summaries = []
+        grad_scalar_summaries = []
         for idx, var in zip(variables_names, self.gradient_holders):
             grad_hist_summary = tf.summary.histogram("/grad/hist/%s" % idx, var)
             grad_summaries.append(grad_hist_summary)
+
+            grad_scalar_summary = tf.summary.scalar("Gradients/grad_%s" %idx, tf.reduce_sum(tf.sqrt(tf.square(var))))
+            grad_scalar_summaries.append(grad_scalar_summary)
 
         # keep track of weights
         weight_summary = []
@@ -231,68 +142,8 @@ class QNetwork():
             weight_summary.append(weight_hist_summary)
 
         # concat summaries
-        self.summaries_gradvar = tf.summary.merge([grad_summaries, weight_summary])
+        self.summaries_gradvar = tf.summary.merge([grad_summaries, weight_summary, grad_scalar_summaries])
 
-    def _sample_prior(self):
-        ''' sample wt from prior '''
-        update_op = tf.assign(self.wt, self._sample_MN(self.w0_bar, tf.matrix_inverse(self.L0)))
-        return update_op
-
-    def _sample_posterior(self, wt_bar, Lt_inv):
-        ''' sample wt from posterior '''
-        update_op = tf.assign(self.wt, self._sample_MN(wt_bar, Lt_inv))
-        return update_op
-
-    def _sample_MN(self, mu, cov):
-        ''' sample from multi-variate normal '''
-        #A = tf.linalg.cholesky(cov)
-        V, U = tf.linalg.eigh(cov)
-        z = tf.random_normal(shape=[self.latent_dim,1])
-        #x = mu + tf.matmul(A, z)
-        x = mu+ tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
-        return x
-
-    def _update_posterior(self, phi_hat, reward):
-        ''' update posterior distribution '''
-        # I've done that differently than outlined in the write-up
-        # since I don't like to put the noise variance inside the prior
-        Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context)) # noise precision
-        Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0
-        Lt_inv = tf.linalg.inv(Lt) # posterior variance
-        wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
-                          tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
-        wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean
-
-        return wt_bar, Lt_inv
-
-    def _max_posterior(self, phi_next, phi_taken, reward):
-        ''' determine wt_bar for calculating phi(s_{t+1}, a*) '''
-        # determine phi(max_action) based on Q determined by sampling wt from prior
-        Q_next = tf.einsum('ijk,jl->ik', phi_next, self.w0_bar)
-        max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
-        phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
-
-        # iterations
-        for _ in range(self.iter_amax):
-            #
-            phi_hat = phi_taken - self.gamma* phi_max
-
-            # update posterior distributior
-            wt_bar, Lt_inv = self._update_posterior(phi_hat, reward)
-
-            # determine phi(max_action) based on Q determined by sampling wt from posterior
-            Q_next = tf.einsum('i,jik->jk', tf.reshape(wt_bar, [-1]), phi_next)
-            max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
-            phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
-
-        # stop gradient through context
-        phi_max = tf.stop_gradient(phi_max)
-        phi_hat = phi_taken - self.gamma * phi_max
-
-        # update posterior distribution
-        wt_bar, Lt_inv = self._update_posterior(phi_hat, reward)
-
-        return wt_bar, Lt_inv
 
     def copy_params(self):
         # copy parameters

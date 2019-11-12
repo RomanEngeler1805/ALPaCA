@@ -56,6 +56,7 @@ class bandit_environment():
         reward_all = np.einsum('i,i->i',self.theta, psi)
         reward_agent = reward_all[action]#+ 0.22* np.random.normal()
         reward_max = np.max(reward_all)
+        reward_rand = np.random.choice(reward_all)
 
         d = 0
 
@@ -63,6 +64,6 @@ class bandit_environment():
         self._sample_state()
 
         # observe (untransformed) state and reward
-        obs = np.array([self.state.flatten(), reward_agent, d, reward_max])
+        obs = np.array([self.state.flatten(), reward_agent, d, reward_max, reward_rand])
 
         return obs
