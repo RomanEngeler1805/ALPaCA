@@ -1,9 +1,21 @@
 #!/bin/bash
 echo "==================="
-for noise in 0.1 1.0 10. 100.
-do
-	python alpaca.py --noise_precision=$noise --noise_precmax=$noise --gamma=0.9&
-	sleep 1m
-  python alpaca.py --noise_precision=$noise --noise_precmax=$noise --gamma=0.98 &
-	wait
-done
+python alpaca.py --noise_precmax=3.0 --gamma=0.9&
+sleep 1m
+python alpaca.py --noise_precmax=3.0 --gamma=0.95&
+sleep 1
+python alpaca.py --noise_precmax=3.0 --gamma=0.98&
+sleep 1m
+#
+python alpaca.py --noise_precmax=10.0 --gamma=0.9&
+sleep 1m
+python alpaca.py --noise_precmax=10.0 --gamma=0.95&
+sleep 1m
+python alpaca.py --noise_precmax=10.0 --gamma=0.98&
+sleep 1m
+# 
+python alpaca.py --noise_precmax=30.0 --gamma=0.90&
+sleep 1m
+python alpaca.py --noise_precmax=30.0 --gamma=0.95&
+sleep 1m
+python alpaca.py --noise_precmax=30.0 --gamma=0.98

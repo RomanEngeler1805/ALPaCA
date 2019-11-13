@@ -35,7 +35,7 @@ tf.flags.DEFINE_integer("nstep", 1, "n-step TD return")
 
 # domain
 tf.flags.DEFINE_integer("action_space", 7, "Dimensionality of action space")  # only x-y currently
-tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
+tf.flags.DEFINE_integer("state_space", 8, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
 
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
@@ -59,8 +59,9 @@ tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 # loss
-tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate") # X
+tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("lr_final", 2e-4, "Final learning rate")
 tf.flags.DEFINE_float("grad_clip", 1e4, "Absolute value to clip gradients")
 tf.flags.DEFINE_float("huber_d", 1e1, "Switch point from quadratic to linear")
 tf.flags.DEFINE_float("regularizer", 1e-2, "Regularization parameter") # X
@@ -420,7 +421,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             batch_size *= 2
 
         # learning rate schedule
-        if learning_rate > 5e-6:
+        if learning_rate > FLAGS.lr_final:
             learning_rate /= FLAGS.lr_drop
 
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
