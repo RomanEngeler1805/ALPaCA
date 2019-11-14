@@ -145,9 +145,9 @@ class PushEnv(gym.Env):
         vel_robot_lin, _ = p.getBaseVelocity(self.robot_id)
 
         return np.concatenate([np.asarray(pos_robot[:2]),
-            np.asarray(vel_robot_lin[:2]),
+                               self.velocity_vector,
                                pos_object_COM,
-                               np.asarray(vel_object_lin[:2])])
+                               np.asarray(vel_robot_lin[:2])])
 
 if __name__ == '__main__':
     # for some basic tests

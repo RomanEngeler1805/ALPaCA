@@ -165,7 +165,7 @@ def generate_mesh(Nx=30, Ny=20):
     px_object = np.zeros_like(px_robot_mesh)+ 0.02 # ~ radius
     py_object = np.zeros_like(py_robot_mesh)
 
-    vx_object = vx * np.ones([Nx * Ny, 1])
+    vx_object =vx * np.ones([Nx * Ny, 1])
     vy_object = vy * np.ones([Nx * Ny, 1])
 
     mesh = np.concatenate([px_robot_mesh.reshape(-1, 1),

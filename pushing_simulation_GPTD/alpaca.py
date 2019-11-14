@@ -22,7 +22,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 # General Hyperparameters
 # general
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
+tf.flags.DEFINE_float("gamma", 0.90, "Discount factor")
 tf.flags.DEFINE_integer("N_episodes", 13000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
@@ -40,7 +40,7 @@ tf.flags.DEFINE_integer("state_space", 8, "Dimensionality of state space")  # [x
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 10.0, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 30.0, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
@@ -59,7 +59,7 @@ tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 # loss
-tf.flags.DEFINE_float("learning_rate", 2e-2, "Initial learning rate")
+tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
 tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
 tf.flags.DEFINE_float("lr_final", 2e-4, "Final learning rate")
 tf.flags.DEFINE_float("grad_clip", 1e4, "Absolute value to clip gradients")
