@@ -67,7 +67,7 @@ tf.flags.DEFINE_float("huber_d", 1e1, "Switch point from quadratic to linear")
 tf.flags.DEFINE_float("regularizer", 1e-2, "Regularization parameter") # X
 
 # reward
-tf.flags.DEFINE_float("rew_norm", 1e0, "Normalization factor for reward")
+tf.flags.DEFINE_float("rew_norm", 1e-1, "Normalization factor for reward")
 
 # memory
 tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
@@ -190,7 +190,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
     # report mean reward per episode
     reward_episode = []
-
+ 
     # timing
     time_env = []
     time_sgd = []

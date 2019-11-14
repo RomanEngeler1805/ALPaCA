@@ -222,6 +222,11 @@ class QNetwork():
             self.loss2 = logdet_Sigma
             self.loss_reg = tf.losses.get_regularization_loss(scope=self.scope)
 
+            self.loss_kl = -self.latent_dim + tf.linalg.logdet(self.L0) - tf.linalg.logdet(tf.linalg.inv(self.Lt_inv)) + \
+                         tf.linalg.trace(tf.matmul(tf.linalg.inv(self.Lt_inv), tf.linalg.inv(self.L0))) + \
+                         tf.matmul(tf.matmul(tf.linalg.transpose((self.wt_bar - self.w0_bar)), tf.linalg.inv(self.Lt_inv)),
+                                   (self.wt_bar - self.w0_bar))
+
             # tf.losses.huber_loss(labels, predictions, delta=100.)
             self.loss = self.loss1 + self.loss2 + self.regularizer * self.loss_reg
             
