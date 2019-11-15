@@ -36,7 +36,7 @@ class environment():
         # Sparse Reward
         if self.state[self.target] == 1:
             return 1.
-        return -0.1
+        return 0.0
 
     '''
 

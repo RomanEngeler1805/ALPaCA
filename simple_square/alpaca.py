@@ -23,16 +23,16 @@ tf.flags.DEFINE_integer("action_space", 3, "Dimensionality of action space")
 tf.flags.DEFINE_integer("state_space", 9, "Dimensionality of state space")
 tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
-tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
+tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 
-tf.flags.DEFINE_float("learning_rate", 3e-4, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.0001, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("learning_rate", 5e-2, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.2, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 10., "Noise precision (1/var)") # increase
-tf.flags.DEFINE_float("noise_precmax", 30, "Maximum noise precision (1/var)")
-tf.flags.DEFINE_integer("noise_Ndrop", 50, "Increase noise precision every N steps")
-tf.flags.DEFINE_float("noise_precstep", 1.0001, "Step of noise precision s*=ds")
+tf.flags.DEFINE_float("noise_precmax", 10.0, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
+tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 10000, "Increase split ratio every N steps")
 tf.flags.DEFINE_float("split_ratio", 0.2, "Initial split ratio for conditioning")
@@ -41,18 +41,18 @@ tf.flags.DEFINE_integer("update_freq_post", 4, "Update frequency of posterior an
 tf.flags.DEFINE_integer("kl_freq", 100, "Update kl divergence comparison")
 tf.flags.DEFINE_float("kl_lambda", 10., "Weight for Kl divergence in loss")
 
-tf.flags.DEFINE_integer("N_episodes", 6001, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 8001, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
 
-tf.flags.DEFINE_float("tau", 1., "Update speed of target network")
+tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
-tf.flags.DEFINE_integer("replay_memory_size", 1000, "Size of replay memory")
+tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
 tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
-tf.flags.DEFINE_string('non_linearity', 'sigm', 'Non-linearity used in encoder')
+tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
 
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
 
@@ -109,8 +109,8 @@ def plot_Valuefcn_confidence(Valuefcn, dValuefcn, target, save_path, states=np.a
     # dValuefcn/= np.mean(Valuefcn, axis=1)[:, None]
 
     #
-    fig, ax = plt.subplots(figsize=[8, 4], nrows=5)
-    for s in range(4):
+    fig, ax = plt.subplots(figsize=[8, 4], nrows=6)
+    for s in range(5):
         ax[s].plot(np.arange(9), Valuefcn[s], c='b')
         lower = Valuefcn[s]- 1.96* np.sqrt(dValuefcn[s])
         upper = Valuefcn[s]+ 1.96* np.sqrt(dValuefcn[s])
@@ -123,15 +123,15 @@ def plot_Valuefcn_confidence(Valuefcn, dValuefcn, target, save_path, states=np.a
         #ax[s].set_ylim([0.7* np.min(Valuefcn[s]), 1.3* np.max(Valuefcn[s])])
         #ax[s].set_yticks([])
 
-    ax[4].plot(np.arange(9), Valuefcn[7], c='b')
-    lower = Valuefcn[7] - 1.96 * np.sqrt(dValuefcn[7])
-    upper = Valuefcn[7] + 1.96 * np.sqrt(dValuefcn[7])
-    ax[4].fill_between(np.arange(9), lower, upper, alpha=0.5)
-    ax[4].plot([target, target], [np.min(lower), np.max(upper)], c='r')
-    pos = np.argmax(states[7])
-    ax[4].plot([pos, pos], [np.min(lower), np.max(upper)], c='b')  # imshow makes y-axis pointing downwards
+    ax[5].plot(np.arange(9), Valuefcn[10], c='b')
+    lower = Valuefcn[10] - 1.96 * np.sqrt(dValuefcn[10])
+    upper = Valuefcn[10] + 1.96 * np.sqrt(dValuefcn[10])
+    ax[5].fill_between(np.arange(9), lower, upper, alpha=0.5)
+    ax[5].plot([target, target], [np.min(lower), np.max(upper)], c='r')
+    pos = np.argmax(states[10])
+    ax[5].plot([pos, pos], [np.min(lower), np.max(upper)], c='b')  # imshow makes y-axis pointing downwards
 
-    ax[4].set_xticks([])
+    ax[5].set_xticks([])
     #ax[4].set_ylim([0.7 * np.min(Valuefcn[7]), 1.3 * np.max(Valuefcn[7])])
     # ax[s].set_yticks([])
 
@@ -436,24 +436,34 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                               QNet.nprec: noise_precision})
 
             # evaluate target model
-            phi_max_target = sess.run(Qtarget.phi_max,
-                                   feed_dict={Qtarget.context_state: state_train, Qtarget.context_action: action_train,
+            phi_max_target, Q_max_target = sess.run([Qtarget.phi_max, Qtarget.Qmax],
+                                   feed_dict={Qtarget.context_state: state_train,
+                                              Qtarget.context_action: action_train,
                                               Qtarget.context_reward: reward_train,
                                               Qtarget.context_state_next: next_state_train,
-                                              Qtarget.state: state_valid, Qtarget.state_next: next_state_valid,
+                                              Qtarget.state: state_valid,
+                                              Qtarget.state_next: next_state_valid,
                                               Qtarget.lr_placeholder: learning_rate,
-                                              Qtarget.nprec: noise_precision, Qtarget.amax_online: amax_online})
+                                              Qtarget.nprec: noise_precision,
+                                              Qtarget.amax_online: amax_online})
 
             # update model
             grads, loss0, Qdiff = sess.run(
                 [QNet.gradients, QNet.loss, QNet.Qdiff],
-                feed_dict={QNet.context_state: state_train, QNet.context_action: action_train,
-                           QNet.context_reward: reward_train, QNet.context_state_next: next_state_train,
-                           QNet.state: state_valid, QNet.action: action_valid,
-                           QNet.reward: reward_valid, QNet.state_next: next_state_valid,
+                feed_dict={QNet.context_state: state_train,
+                           QNet.context_action: action_train,
+                           QNet.context_reward: reward_train,
+                           QNet.context_state_next: next_state_train,
+                           QNet.state: state_valid,
+                           QNet.action: action_valid,
+                           QNet.reward: reward_valid,
+                           QNet.state_next: next_state_valid,
                            QNet.done: done_valid,
-                           QNet.lr_placeholder: learning_rate, QNet.nprec: noise_precision,
-                           QNet.phi_max_target: phi_max_target, QNet.amax_online: amax_online})
+                           QNet.lr_placeholder: learning_rate,
+                           QNet.nprec: noise_precision,
+                           QNet.Qmax_target: Q_max_target,
+                           QNet.phi_max_target: phi_max_target,
+                           QNet.amax_online: amax_online})
 
             # XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 

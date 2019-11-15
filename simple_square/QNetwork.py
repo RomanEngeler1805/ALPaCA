@@ -38,28 +38,26 @@ class QNetwork():
             self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
             hidden1 = self.activation(self.hidden1)
+            #hidden1 = tf.contrib.layers.layer_norm(hidden1)
+            hidden1 = tf.concat([hidden1, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
 
             self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden2 = self.activation(self.hidden2)
-            hidden2 = tf.concat([hidden2, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
-
-            self.hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.hidden_dim, activation_fn=None,
-                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
-            hidden3 = self.activation(self.hidden3)
+            #hidden2 = tf.contrib.layers.layer_norm(hidden2)
 
             # single head
-            hidden5 = tf.contrib.layers.fully_connected(hidden3, num_outputs=self.latent_dim, activation_fn=None,
+            hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=None,
                                                         weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                         weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
 
-            # bring it into the right order of shape [batch_size, latent_dim, action_dim]
-            hidden5_rs = tf.reshape(hidden5, [-1, self.action_dim, self.latent_dim])
-            hidden5_rs = tf.transpose(hidden5_rs, [0, 2, 1])
+            # bring it into the right order of shape [batch_size, hidden_dim, action_dim]
+            hidden3_rs = tf.reshape(hidden3, [-1, self.action_dim, self.latent_dim])
+            hidden3_rs = tf.transpose(hidden3_rs, [0, 2, 1])
 
-        return hidden5_rs
+        return hidden3_rs
+
 
     def state_trafo(self, state, action):
         ''' append action to the state '''
@@ -161,16 +159,17 @@ class QNetwork():
         self.amax_online = tf.placeholder(shape=[None, 1, self.action_dim], dtype=tf.float32, name='amax_online')
         self.phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.amax_online), axis=2)
 
-        self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='Qmax_target')
+        self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='phi_max_target')
         '''
         phi_max = tf.reduce_sum(tf.multiply(self.phi_next, self.max_action), axis=2)
         phi_max = tf.einsum('b,ba->ba', (tf.ones(bs, ) - self.done), phi_max)
         phi_max = tf.stop_gradient(phi_max)
         '''
 
-        self.Qmax_target = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
+        self.Qmax = tf.einsum('im,bi->b', self.wt_bar, self.phi_max)
+        self.Qmax_target = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')
 
-        self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_target)
+        self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax)
 
         # Q(s',a*)+ r- Q(s,a)
         self.Qdiff = self.Qtarget - self.Q
@@ -186,11 +185,6 @@ class QNetwork():
         # loss
         self.loss0 = tf.einsum('i,i->', self.Qdiff, self.Qdiff, name='loss0')
         self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
-
-        sigma_pred_inv = tf.linalg.inv(tf.sqrt(tf.linalg.diag(Sigma_pred)))
-        labels = tf.matmul(sigma_pred_inv, tf.reshape(self.Qtarget, [-1,1]))#tf.einsum('i,ik->k', self.Qtarget, tf.sqrt(sigma_pred_inv))
-        predictions = tf.matmul(sigma_pred_inv, tf.reshape(self.Q, [-1,1]))#tf.einsum('i,ik->k', self.Q, tf.sqrt(sigma_pred_inv))
-
         self.loss2 = logdet_Sigma
 
         # tf.losses.huber_loss(labels, predictions, delta=100.)
@@ -252,23 +246,23 @@ class QNetwork():
 
     def _sample_MN(self, mu, cov):
         ''' sample from multi-variate normal '''
-        #A = tf.linalg.cholesky(cov)
+        # A = tf.linalg.cholesky(cov)
         V, U = tf.linalg.eigh(cov)
-        z = tf.random_normal(shape=[self.latent_dim,1])
-        #x = mu + tf.matmul(A, z)
-        x = mu+ tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
+        z = tf.random_normal(shape=[self.latent_dim, 1])
+        # x = mu + tf.matmul(A, z)
+        x = mu + tf.matmul(tf.matmul(U, tf.sqrt(tf.linalg.diag(V))), z)
         return x
 
     def _update_posterior(self, phi_hat, reward):
         ''' update posterior distribution '''
         # I've done that differently than outlined in the write-up
         # since I don't like to put the noise variance inside the prior
-        Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context)) # noise precision
+        Le = tf.linalg.inv(tf.linalg.diag(self.Sigma_e_context))  # noise precision
         Lt = tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, phi_hat)) + self.L0
-        Lt_inv = tf.linalg.inv(Lt) # posterior variance
+        Lt_inv = tf.linalg.inv(Lt)  # posterior variance
         wt_unnormalized = tf.matmul(self.L0, self.w0_bar) + \
                           tf.matmul(tf.transpose(phi_hat), tf.matmul(Le, tf.reshape(reward, [-1, 1])))
-        wt_bar = tf.matmul(Lt_inv, wt_unnormalized) # posterior mean
+        wt_bar = tf.matmul(Lt_inv, wt_unnormalized)  # posterior mean
 
         return wt_bar, Lt_inv
 
@@ -282,18 +276,18 @@ class QNetwork():
         # iterations
         for _ in range(self.iter_amax):
             #
-            phi_hat = phi_taken - self.gamma* phi_max
+            phi_hat = phi_taken - self.gamma * phi_max
 
             # update posterior distributior
             wt_bar, Lt_inv = self._update_posterior(phi_hat, reward)
 
             # determine phi(max_action) based on Q determined by sampling wt from posterior
-            Q_next = tf.einsum('i,jik->jk', tf.reshape(wt_bar, [-1]), phi_next)
+            Q_next = tf.einsum('i,bia->ba', tf.reshape(wt_bar, [-1]), phi_next)
             max_action = tf.one_hot(tf.reshape(tf.argmax(Q_next, axis=1), [-1, 1]), self.action_dim, dtype=tf.float32)
             phi_max = tf.reduce_sum(tf.multiply(phi_next, max_action), axis=2)
 
         # stop gradient through context
-        phi_max = tf.stop_gradient(phi_max)
+        #phi_max = tf.stop_gradient(phi_max)
         phi_hat = phi_taken - self.gamma * phi_max
 
         # update posterior distribution
@@ -305,6 +299,6 @@ class QNetwork():
         # copy parameters
         update_op = []
         for (v_old, v_new) in zip(self.tvars, self.variable_holders):
-            update_op.append(tf.assign(v_old, (1.- self.tau)* v_old+ self.tau* v_new))
+            update_op.append(tf.assign(v_old, (1. - self.tau) * v_old + self.tau * v_new))
 
         return update_op
