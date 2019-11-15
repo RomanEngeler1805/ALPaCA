@@ -11,16 +11,21 @@ class A2C:
         scope,
         policy_cls,
         hidden_dim=256,
-        action_dim=3,
+        action_dim=1,
+        vf_coef = 0.05,
+        ent_coef = 0.01,
+        step_size= 2e-4,
+        lr_drop= 0.9997,
         encode_state=False,
         grad_clip=10):
 
         # parameters
         self.input_dim = 9
-        self.action_dim = 1
-        self.vf_ceof = 0.05
-        self.ent_coef = 0.01
-        self.step_size = 2e-4
+        self.action_dim = action_dim
+        self.vf_ceof = ent_coef
+        self.ent_coef = ent_coef
+        self.step_size = step_size
+        self.lr_drop = lr_drop
         self.session = session
 
         #TODO: make sure to use encode_state when moving to vision domains
@@ -45,9 +50,11 @@ class A2C:
 
         # policy gradient loss?
         self.pg_loss = tf.reduce_mean(self.ADV * neglogpi)
+
         # value function loss?
         self.vf_loss = tf.reduce_mean(tf.square(tf.squeeze(self.policy.V) - self.R) / 2.)
 
+        # entropy term
         a0 = self.policy.pi - tf.reduce_max(self.policy.pi, 1, keepdims=True)
         ea0 = tf.exp(a0)
         z0 = tf.reduce_sum(ea0, 1, keepdims=True)
@@ -62,7 +69,7 @@ class A2C:
 
         # optimizer
         opt = tf.train.RMSPropOptimizer(learning_rate=self.step_size, decay=0.99, epsilon=1e-5)
-        self.train_op = minimize_and_clip(opt, self.loss, var_list=self.policy.variables, clip_val=grad_clip)
+        self.summaries_gradvar, self.train_op = minimize_and_clip(opt, self.loss, var_list=self.policy.variables, clip_val=grad_clip)
 
         # summary writer
         self.summary_writer = tf.summary.FileWriter(
@@ -83,6 +90,18 @@ class A2C:
             self.policy.prev_h = h_out
         return actions, values
 
+    def evaluate(self, X, A, R):
+        ''' evaluate without updating hidden states '''
+        actions, values, c_out, h_out = self.session.run(
+            [self.act, self.policy.V, self.policy.c_out, self.policy.h_out],
+            feed_dict={self.X: X, self.Aold: A, self.Rold: R,
+                       self.policy.c_in: self.policy.prev_c,
+                       self.policy.h_in: self.policy.prev_h})
+
+        return actions, values
+
+
+
     def reset(self):
         self.policy.reset()
 
@@ -95,37 +114,44 @@ class A2C:
         # TODO TRPO optimizer
         # TODO tensorboard summaries
         # TODO GRU cells
-        self.step_size*= 0.9995
+        self.step_size*= self.lr_drop
 
-        train_dict = {self.X: ep_X[1:], self.ADV: ep_adv[1:], self.A: ep_A[1:], self.R: ep_R[1:],
-                      self.Aold: ep_A[:-1], self.Rold: ep_R[:-1]}
+        train_dict = {self.X: ep_X[1:],
+                      self.ADV: ep_adv[1:],
+                      self.A: ep_A[1:],
+                      self.R: ep_R[1:],
+                      self.Aold: ep_A[:-1],
+                      self.Rold: ep_R[:-1]}
+
         if self.policy.recurrent:
             train_dict[self.policy.c_in] = self.policy.c_init
             train_dict[self.policy.h_in] = self.policy.h_init
-        pLoss, vLoss, Vfcn, ent, _ = self.session.run([self.pg_loss, self.vf_loss, self.policy.V, self.entropy, self.train_op],
-			feed_dict=train_dict)
+        pLoss, vLoss, Vfcn, entropy, _, summaries_gradvar = self.session.run([self.pg_loss,
+                                                                          self.vf_loss,
+                                                                          self.policy.V,
+                                                                          self.entropy,
+                                                                          self.train_op,
+                                                                          self.summaries_gradvar],
+                                                                         feed_dict=train_dict)
 
-        if episode % 100 == 0:
+        if episode % 1000 == 0:
             print('lr '+ str(self.step_size))
 
-        pLoss_summary = tf.Summary(value=[tf.Summary.Value(tag='pLoss', simple_value=pLoss)])
-        vLoss_summary = tf.Summary(value=[tf.Summary.Value(tag='vLoss', simple_value=vLoss)])
+        pLoss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/pLoss', simple_value=pLoss)])
+        vLoss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/vLoss', simple_value=vLoss)])
+        entropy_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/entropy', simple_value=entropy)])
         reward_summary = tf.Summary(value=[tf.Summary.Value(tag='reward', simple_value=np.sum(ep_R))])
+        lr_summary = tf.Summary(value=[tf.Summary.Value(tag='learning_rate', simple_value=self.step_size)])
+        self.summary_writer.add_summary(summaries_gradvar, episode)
         self.summary_writer.add_summary(pLoss_summary, episode)
         self.summary_writer.add_summary(vLoss_summary, episode)
+        self.summary_writer.add_summary(entropy_summary, episode)
         self.summary_writer.add_summary(reward_summary, episode)
+        self.summary_writer.add_summary(lr_summary, episode)
         self.summary_writer.flush()
 
         info = {}
         info['policy_loss'] = pLoss
         info['value_loss'] = vLoss
-        info['policy_entropy'] = ent
+        info['policy_entropy'] = entropy
         return info
-
-    def observe_V(self, X, A, R):
-        train_dict = {self.X: X, self.Aold: A, self.Rold: R}
-        train_dict[self.policy.c_in] = self.policy.c_init
-        train_dict[self.policy.h_in] = self.policy.h_init
-        V = self.session.run(self.policy.V, feed_dict=train_dict)
-
-        return V

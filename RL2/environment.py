@@ -31,18 +31,39 @@ class environment():
         self.state[(self.size - 1) / 2] = 1
         return self.state
 
+    '''
     def reward(self):
-        ''' reward function '''
+        # Sparse Reward
+        if self.state[self.target] == 1:
+            return 1.
+        return 0.0
 
-        '''
+    '''
+
+    def reward(self):
+        # dense reward
+        return 1.*(self.size- 1- np.abs(self.target- np.argmax(self.state)))/ (self.size- 1)
+
+
+    '''
+    def reward(self):
+        # Bernoulli Reward
         p = 1.*(self.size- 1- np.abs(self.target- np.argmax(self.state)))/ (self.size- 1)
         if p > np.random.rand():
             rew = 1.
         else:
             rew = 0.
-        '''
 
-        return 1.*(self.size- 1- np.abs(self.target- np.argmax(self.state)))/ (self.size- 1)
+        return rew
+    '''
+    '''
+    def reward(self):
+        # Gaussian Reward
+        sigma = 0.02
+        mu = 1.-1.*np.abs(self.target- np.argmax(self.state))/ (self.size- 1) # linearly increasing from 0 to 1
+        rew = np.random.normal(mu, sigma)
+        return rew
+    '''
 
     def termination(self):
         ''' determine termination of MDP '''
