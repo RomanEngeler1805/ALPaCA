@@ -26,7 +26,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.16)
 # general
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_float("gamma", 0., "Discount factor")
-tf.flags.DEFINE_integer("N_episodes", 20000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 20001, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 40, "Length of episodes")
 
@@ -42,7 +42,7 @@ tf.flags.DEFINE_integer("state_space", 1, "Dimensionality of state space")
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.5, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 20., "Maximum noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 10., "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
@@ -74,7 +74,7 @@ tf.flags.DEFINE_bool("rew_log", True, "If Log of reward is taken")
 # memory
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 1000, "Store images every N-th episode")
 
 #
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
@@ -557,13 +557,19 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         if episode % 5000 == 0:
             # evaluation =================================================================
             print('Evaluation ===================')
-            # cumulative regret
-            cumulative_regret = []
+            Neval = 500
 
-            # simple regret
-            simple_regret = []
+            #
+            cumulative_reward_agent = []
+            cumulative_reward_max = []
+            cumulative_reward_rand = []
 
-            for test_ep in range(500):
+            #
+            simple_reward_agent = []
+            simple_reward_max = []
+            simple_reward_rand = []
+
+            for test_ep in range(Neval):
                 # new environment
                 env._sample_env()
                 state = env._sample_state().copy()
@@ -628,7 +634,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                                        QNet.nprec: noise_precision})
 
                 #
-                cumulative_regret.append((reward_max - reward_agent) / (reward_max - reward_rand))
+                cumulative_reward_agent.append(reward_agent)
+                cumulative_reward_max.append(reward_max)
+                cumulative_reward_rand.append(reward_rand)
 
                 # no updates to hidden state (simple regret)
                 reward_agent = 0
@@ -649,17 +657,31 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     reward_max += rew_max
                     reward_rand += rew_rand
 
-                simple_regret.append((reward_max - reward_agent) / (reward_max - reward_rand))
+                simple_reward_agent.append(reward_agent)
+                simple_reward_max.append(reward_max)
+                simple_reward_rand.append(reward_rand)
 
-            print('Mean Cumulative Regret: {}'.format(np.mean(np.asarray(cumulative_regret))))
-            print('Mean Simple Regret: {}'.format(np.mean(np.asarray(simple_regret))))
+            # cumulative
+            mean_cumulative_regret = (np.mean(cumulative_reward_max)- np.mean(cumulative_reward_agent)) /\
+                                     (np.mean(cumulative_reward_max) - np.mean(cumulative_reward_rand))
+            stdv_cumulative_regret = 1./ np.sqrt(Neval)* np.std(cumulative_reward_agent)/ \
+                                     (np.mean(cumulative_reward_max) - np.mean(cumulative_reward_rand))
+
+            # simple
+            mean_simple_regret = (np.mean(simple_reward_max) - np.mean(simple_reward_agent)) / \
+                                     (np.mean(simple_reward_max) - np.mean(simple_reward_rand))
+            stdv_simple_regret = 1. / np.sqrt(Neval) * np.std(simple_reward_agent) / \
+                                     (np.mean(simple_reward_max) - np.mean(simple_reward_rand))
+
+            print('Mean Cumulative Regret: {}'.format(mean_cumulative_regret))
+            print('Mean Simple Regret: {}'.format(mean_simple_regret))
 
             file = open(reward_dir + 'test_regret_per_episode', 'a')
             file.write('Cumulative Regret\n')
             file.write(
-                '{:3.4f}% +- {:2.4f}%\n'.format(np.mean(np.asarray(cumulative_regret)), np.std(np.asarray(cumulative_regret))))
+                '{:3.4f}% +- {:2.4f}%\n'.format(mean_cumulative_regret, stdv_cumulative_regret))
             file.write('Simple Regret\n')
-            file.write('{:3.4f}% +- {:2.4f}%\n'.format(np.mean(np.asarray(simple_regret)), np.std(np.asarray(simple_regret))))
+            file.write('{:3.4f}% +- {:2.4f}%\n'.format(mean_simple_regret, stdv_simple_regret))
             file.close()
 
     # write reward to file
