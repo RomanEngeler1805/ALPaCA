@@ -124,7 +124,7 @@ class PushEnv(gym.Env):
         #    done = True
 
         # calculate reward
-        reward = .01 / (.01 + np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)) # 1/ dist(object_to_target)
+        reward = self.rew_scale / (0.01 + np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)) # 1/ dist(object_to_target)
         #reward = self.rew_scale* (0.3- np.linalg.norm(obs[4:6] - self.target_position))
 
         return obs, reward, done, {}

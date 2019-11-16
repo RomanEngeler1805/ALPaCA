@@ -23,7 +23,7 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 # general
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
 tf.flags.DEFINE_float("gamma", 0.90, "Discount factor")
-tf.flags.DEFINE_integer("N_episodes", 13000, "Number of episodes")
+tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
 
