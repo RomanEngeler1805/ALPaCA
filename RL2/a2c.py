@@ -65,7 +65,7 @@ class A2C:
 
         # action selection
         rand_u = tf.random_uniform(tf.shape(self.policy.pi)) # introduce randomness in policy
-        self.act = tf.squeeze(tf.argmax(self.policy.pi - tf.log(-tf.log(rand_u)), axis=-1))
+        self.act = tf.squeeze(tf.argmax(self.policy.pi - 0.1* tf.log(-tf.log(rand_u)), axis=-1))
 
         # optimizer
         opt = tf.train.RMSPropOptimizer(learning_rate=self.step_size, decay=0.99, epsilon=1e-5)
@@ -137,18 +137,19 @@ class A2C:
         if episode % 1000 == 0:
             print('lr '+ str(self.step_size))
 
-        pLoss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/pLoss', simple_value=pLoss)])
-        vLoss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/vLoss', simple_value=vLoss)])
-        entropy_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/entropy', simple_value=entropy)])
-        reward_summary = tf.Summary(value=[tf.Summary.Value(tag='reward', simple_value=np.sum(ep_R))])
-        lr_summary = tf.Summary(value=[tf.Summary.Value(tag='learning_rate', simple_value=self.step_size)])
-        self.summary_writer.add_summary(summaries_gradvar, episode)
-        self.summary_writer.add_summary(pLoss_summary, episode)
-        self.summary_writer.add_summary(vLoss_summary, episode)
-        self.summary_writer.add_summary(entropy_summary, episode)
-        self.summary_writer.add_summary(reward_summary, episode)
-        self.summary_writer.add_summary(lr_summary, episode)
-        self.summary_writer.flush()
+        if episode % 20 == 0:
+            pLoss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/pLoss', simple_value=pLoss)])
+            vLoss_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/vLoss', simple_value=vLoss)])
+            entropy_summary = tf.Summary(value=[tf.Summary.Value(tag='Loss/entropy', simple_value=entropy)])
+            reward_summary = tf.Summary(value=[tf.Summary.Value(tag='reward', simple_value=np.sum(ep_R))])
+            lr_summary = tf.Summary(value=[tf.Summary.Value(tag='learning_rate', simple_value=self.step_size)])
+            self.summary_writer.add_summary(summaries_gradvar, episode)
+            self.summary_writer.add_summary(pLoss_summary, episode)
+            self.summary_writer.add_summary(vLoss_summary, episode)
+            self.summary_writer.add_summary(entropy_summary, episode)
+            self.summary_writer.add_summary(reward_summary, episode)
+            self.summary_writer.add_summary(lr_summary, episode)
+            self.summary_writer.flush()
 
         info = {}
         info['policy_loss'] = pLoss

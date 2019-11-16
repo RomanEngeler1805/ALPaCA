@@ -17,18 +17,18 @@ def main():
     # TODO same parameters as in RL2 paper
     # TODO plot trajectories for inspection
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_eps', type=int, default=int(1e4), help='training episodes')
+    parser.add_argument('--train_eps', type=int, default=int(1.5e4), help='training episodes')
     parser.add_argument('--test_eps', type=int, default=1000, help='test episodes')
     parser.add_argument('--seed', type=int, default=1, help='experiment seed')
 
     # Training Hyperparameters
     parser.add_argument('--hidden', type=int, default=64, help='hidden layer dimensions')
-    parser.add_argument('--gamma', type=float, default=0.9, help='discount factor')
+    parser.add_argument('--gamma', type=float, default=0.90, help='discount factor')
     parser.add_argument('--action_space', type=int, default=3, help='action space')
 
     parser.add_argument('--vf_coef', type=float, default=0.5, help='hidden layer dimensions')
     parser.add_argument('--ent_coef', type=float, default=0.01, help='discount factor')
-    parser.add_argument('--step_size', type=float, default=2e-4, help='action space')
+    parser.add_argument('--step_size', type=float, default=5e-5, help='action space')
     parser.add_argument('--lr_drop', type=float, default=0.9997, help='learning rate drop')
 
     args = parser.parse_args()
