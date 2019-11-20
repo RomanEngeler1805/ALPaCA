@@ -91,8 +91,8 @@ class QNetwork():
             self.Sigma_e = 1. / self.nprec * tf.ones(bs, name='noise_precision')
 
         ## latent representation
-        self.phi = self.model(self.state, action_augm)  # latent space
-        self.phi_next = self.model(self.state_next, action_augm)  # latent space
+        self.phi = self.model(self.state* tf.constant([1., 1., 1., 1., 10., 10.]), action_augm)  # latent space
+        self.phi_next = self.model(self.state_next* tf.constant([1., 1., 1., 1., 10., 10.]), action_augm)  # latent space
 
         # placeholders context data =======================================================
         with tf.variable_scope("conditioning", reuse=tf.AUTO_REUSE):
@@ -113,8 +113,8 @@ class QNetwork():
             self.Sigma_e_context = 1. / self.nprec * tf.ones(bsc, name='noise_precision')
 
         ## latent representation
-        self.context_phi = self.model(self.context_state, context_action_augm)  # latent space
-        self.context_phi_next = self.model(self.context_state_next, context_action_augm)  # latent space
+        self.context_phi = self.model(self.context_state* tf.constant([1., 1., 1., 1., 10., 10.]), context_action_augm)  # latent space
+        self.context_phi_next = self.model(self.context_state_next* tf.constant([1., 1., 1., 1., 10., 10.]), context_action_augm)  # latent space
 
         with tf.variable_scope("Bayesian", reuse=tf.AUTO_REUSE):
             # Bayesian layer
@@ -151,7 +151,7 @@ class QNetwork():
 
         with tf.variable_scope("loss", reuse=tf.AUTO_REUSE):
 
-            '''
+            
             # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             en = tf.random_normal(shape=[bs, self.latent_dim])
             Lt_inv_chol = tf.linalg.cholesky(self.Lt_inv)
@@ -177,9 +177,16 @@ class QNetwork():
             # Bellmann residual
             self.Qdiff = self.Qtarget - self.Qcurr
 
+            self.loss_reg = tf.losses.get_regularization_loss(scope=self.scope)
+
+            self.loss_kl = -self.latent_dim + tf.linalg.logdet(self.L0) - tf.linalg.logdet(tf.linalg.inv(self.Lt_inv)) + \
+                         tf.linalg.trace(tf.matmul(tf.linalg.inv(self.Lt_inv), tf.linalg.inv(self.L0))) + \
+                         tf.matmul(tf.matmul(tf.linalg.transpose((self.wt_bar - self.w0_bar)), tf.linalg.inv(self.Lt_inv)),
+                                   (self.wt_bar - self.w0_bar))
+
             # tf.losses.huber_loss(labels, predictions, delta=100.)
             self.loss = tf.reduce_logsumexp(tf.square(self.Qdiff))+\
-                        self.regularizer * tf.losses.get_regularization_loss(scope=self.scope)
+                        self.regularizer * self.loss_reg
 
             # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             '''
@@ -196,17 +203,19 @@ class QNetwork():
             self.phi_max_target = tf.placeholder(shape=[None, self.latent_dim], dtype=tf.float32, name='phimax_target')
             #
             self.Qmax = tf.einsum('im,bi->b', self.wt_bar, self.phi_max)
-            #self.Qmax_online = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')  # Qmax into Q network
-            self.Qmax_online = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
+            self.Qmax_online = tf.placeholder(shape=[None], dtype=tf.float32, name='Qmax_target')  # Qmax into Q network
+            #self.Qmax_online = tf.einsum('im,bi->b', self.wt_bar, self.phi_max_target)
 
             # Qtarget = r- Q(s,a)
             self.Qtarget = self.reward + self.gamma * tf.multiply(1 - self.done, self.Qmax_online)
-
+            
             # Bellmann residual
             self.Qdiff = self.Qtarget - self.Qcurr
 
             #
+            #self.phi_hat = phi_taken - self.gamma * self.phi_max_target
             self.phi_hat = phi_taken - self.gamma * self.phi_max_target
+            
 
             Sigma_pred = tf.einsum('bi,ij,bj->b', self.phi_hat, self.Lt_inv, self.phi_hat,
                                    name='Sigma_pred') + self.Sigma_e  # column vector
@@ -216,11 +225,11 @@ class QNetwork():
             self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff,
                                    name='loss1')
             self.loss2 = logdet_Sigma
+            self.loss_reg = tf.losses.get_regularization_loss(scope=self.scope)
 
             # tf.losses.huber_loss(labels, predictions, delta=100.)
-            self.loss = self.loss1 + self.loss2 + self.regularizer * tf.losses.get_regularization_loss(scope=self.scope)
-
-
+            self.loss = self.loss1 + self.loss2 + self.regularizer * self.loss_reg
+            '''
         # optimizer =====================================================================
         with tf.variable_scope("optimizer", reuse=tf.AUTO_REUSE):
             self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)

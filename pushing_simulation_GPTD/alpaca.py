@@ -7,6 +7,8 @@ import tensorflow as tf
 import os
 import time
 import logging
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 import pandas as pd
@@ -20,31 +22,31 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 # General Hyperparameters
 # general
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_float("gamma", 0.98, "Discount factor")
-tf.flags.DEFINE_integer("N_episodes", 10000, "Number of episodes")
+tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
+tf.flags.DEFINE_integer("N_episodes", 13000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
-tf.flags.DEFINE_integer("L_episode", 35, "Length of episodes")
+tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
 
 # architecture
-tf.flags.DEFINE_integer("hidden_space", 128, "Dimensionality of hidden space")
-tf.flags.DEFINE_integer("latent_space", 16, "Dimensionality of latent space")
+tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
+tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
 tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
 tf.flags.DEFINE_integer("nstep", 1, "n-step TD return")
 
 # domain
-tf.flags.DEFINE_integer("action_space", 5, "Dimensionality of action space")  # only x-y currently
+tf.flags.DEFINE_integer("action_space", 7, "Dimensionality of action space")  # only x-y currently
 tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
 
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 10, "Noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
 tf.flags.DEFINE_float("noise_precmax", 10.0, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
 tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-tf.flags.DEFINE_float("split_ratio", 0.5, "Initial split ratio for conditioning")
-tf.flags.DEFINE_float("split_ratio_max", 0.5, "Maximum split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio", 0.85, "Initial split ratio for conditioning")
+tf.flags.DEFINE_float("split_ratio_max", 0.85, "Maximum split ratio for conditioning")
 tf.flags.DEFINE_integer("update_freq_post", 5, "Update frequency of posterior and sampling of new policy")
 
 # exploration
@@ -57,8 +59,9 @@ tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 # loss
-tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate") # X
-tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("learning_rate", 1e-2, "Initial learning rate") # X 5e-3
+tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode") # 3
+tf.flags.DEFINE_float("lr_final", 2e-4, "Final learning rate")
 tf.flags.DEFINE_float("grad_clip", 1e4, "Absolute value to clip gradients")
 tf.flags.DEFINE_float("huber_d", 1e1, "Switch point from quadratic to linear")
 tf.flags.DEFINE_float("regularizer", 1e-2, "Regularization parameter") # X
@@ -69,7 +72,7 @@ tf.flags.DEFINE_float("rew_norm", 1e0, "Normalization factor for reward")
 # memory
 tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 300, "Store images every N-th episode")
 
 #
 tf.flags.DEFINE_integer("random_seed", 2345, "Random seed for numpy and tensorflow")
@@ -156,6 +159,7 @@ log.info('Build Tensorflow Graph')
 
 # initialize environment
 env = PushEnv()
+env.rew_scale = FLAGS.rew_norm
 
 # initialize
 learning_rate = FLAGS.learning_rate
@@ -208,10 +212,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             #interact
             action = np.random.randint(FLAGS.action_space)
             next_state, reward, done, _ = env.step(action)
-
-            #
-            if not done and step < FLAGS.L_episode-1 :
-                reward *= 0
 
             # store experience in memory
             new_experience = [state, action, reward, next_state, done]
@@ -269,10 +269,6 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 action = eGreedyAction(Qval, eps)
                 next_state, reward, done, _ = env.step(action)
 
-                #
-                if not done and step < FLAGS.L_episode - 1:
-                    reward *= 0
-
                 # store experience in memory
                 new_experience = [state, action, reward, next_state, done]
                 tempbuffer.add(new_experience)
@@ -287,7 +283,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 td_accum += factor* np.abs(Qval[action]- reward - gamma* np.max(Qnew))
 
                 # actual reward
-                rw.append(reward)
+                rw.append(reward/ FLAGS.rew_norm)
                 action_task.append(action)
                 speed_task.append(np.linalg.norm(next_state[2:4]- state[2:4]))
 
@@ -350,7 +346,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             entropy_episode.append(np.sum([-p*np.log(p) for p in action_prob if p != 0.]))
 
             # final distance to target
-            target_distance.append(np.linalg.norm(env.target_position- state[4:6]))
+            target_distance.append(np.linalg.norm(env.target_position- state[:2]- state[4:6]))
 
             # maximum speed of robot arm
             speed_task = np.asarray(speed_task)
@@ -425,7 +421,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             batch_size *= 2
 
         # learning rate schedule
-        if learning_rate > 5e-6:
+        if learning_rate > FLAGS.lr_final:
             learning_rate /= FLAGS.lr_drop
 
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
@@ -455,13 +451,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # print to console
         if episode % FLAGS.save_frequency == 0:
 
-            Neval = 10
+            Neval = 50
             reward_eval = 0.
             for n in range(Neval):
                 reward_eval+= evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, split_ratio, noise_precision)
 
             reward_eval_summary = tf.Summary(
-                value=[tf.Summary.Value(tag='Performance2/Eval Reward Posterior', simple_value=reward_eval)])
+                    value=[tf.Summary.Value(tag='Performance2/Eval Reward Posterior', simple_value=reward_eval/ FLAGS.rew_norm)])
             summary_writer.add_summary(reward_eval_summary, episode)
             summary_writer.flush()
 
@@ -470,7 +466,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 reward_eval += evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, 0., noise_precision)
 
             reward_eval_summary = tf.Summary(
-                value=[tf.Summary.Value(tag='Performance2/Eval Reward Prior', simple_value=reward_eval)])
+                value=[tf.Summary.Value(tag='Performance2/Eval Reward Prior', simple_value=reward_eval/ FLAGS.rew_norm)])
             summary_writer.add_summary(reward_eval_summary, episode)
             summary_writer.flush()
 
