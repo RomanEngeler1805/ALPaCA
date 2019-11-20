@@ -18,13 +18,13 @@ class environment():
         self.target = np.array((self.size-1) * np.random.randint(0, 2))
         #self.target = self.size - 1
 
-        self.rew_mag = 1. + np.random.normal()
+        self.rew_mag = 1.# + np.random.normal()
 
     def _sample_env(self):
         ''' resample delta '''
         self.target = np.array((self.size-1) * np.random.randint(0, 2))
         #self.target = self.size- 1
-        self.rew_mag = 1.+np.random.normal()
+        #self.rew_mag = 1.+np.random.normal()
 
     def _sample_state(self):
         self.state = np.zeros([self.size])
@@ -35,7 +35,7 @@ class environment():
     def reward(self):
         # Sparse Reward
         if self.state[self.target] == 1:
-            return 1.
+            return self.rew_mag
         return 0.0
 
     '''

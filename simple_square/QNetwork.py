@@ -33,19 +33,23 @@ class QNetwork():
 
     def model(self, x, a):
         ''' Embedding into latent space '''
-        with tf.variable_scope("latent", reuse=tf.AUTO_REUSE):
+        with tf.variable_scope("encoding", reuse=tf.AUTO_REUSE):
             # model architecture
             self.hidden1 = tf.contrib.layers.fully_connected(x, num_outputs=self.hidden_dim, activation_fn=None,
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer),)
+                                                             weights_regularizer=tf.contrib.layers.l2_regularizer(
+                                                                 self.regularizer))
             hidden1 = self.activation(self.hidden1)
-            #hidden1 = tf.contrib.layers.layer_norm(hidden1)
-            hidden1 = tf.concat([hidden1, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+            hidden1 = tf.contrib.layers.layer_norm(hidden1)
 
-            self.hidden2 = tf.contrib.layers.fully_connected(hidden1, num_outputs=self.hidden_dim, activation_fn=None,
-                                                        weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                        weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
+            hidden1_ = tf.tile(tf.expand_dims(hidden1, axis=1), [1, 1, self.action_dim]) # |B|x|H|x|A|
+            hidden1_ = tf.reshape(hidden1_, [-1, self.hidden_dim]) # |B x A||H|
+            hidden1_ = tf.concat([hidden1_, tf.one_hot(a, self.action_dim, dtype=tf.float32)], axis=1)
+
+            self.hidden2 = tf.contrib.layers.fully_connected(hidden1_, num_outputs=self.hidden_dim, activation_fn=None,
+                                                             weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                                             weights_regularizer=tf.contrib.layers.l2_regularizer(self.regularizer))
             hidden2 = self.activation(self.hidden2)
-            #hidden2 = tf.contrib.layers.layer_norm(hidden2)
+            hidden2 = tf.contrib.layers.layer_norm(hidden2)
 
             # single head
             hidden3 = tf.contrib.layers.fully_connected(hidden2, num_outputs=self.latent_dim, activation_fn=None,
@@ -58,20 +62,6 @@ class QNetwork():
 
         return hidden3_rs
 
-
-    def state_trafo(self, state, action):
-        ''' append action to the state '''
-        state = tf.expand_dims(state, axis=1)
-        state = tf.tile(state, [1, 1, self.action_dim])
-        state = tf.reshape(state, [-1, self.state_dim])
-
-        #action = tf.one_hot(action, self.action_dim, dtype=tf.float32)
-
-        #state = tf.concat([state, action], axis = 1)
-
-        return state
-
-
     def _build_model(self):
         ''' constructing tensorflow model '''
         #
@@ -81,72 +71,81 @@ class QNetwork():
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
         self.is_online = tf.placeholder_with_default(False, shape=[], name='is_online')
 
-        # placeholders context data =======================================================
-        self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
-        self.context_state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
-        self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
-        self.context_done = tf.placeholder(shape=[None, 1], dtype=tf.float32, name='done')
-        self.context_reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
-
-        # append action s.t. it is an input to the network
-        (bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
-        context_action_augm = tf.range(self.action_dim, dtype=tf.int32)
-        context_action_augm = tf.tile(context_action_augm, [bsc])
-        context_state = self.state_trafo(self.context_state, context_action_augm)
-        context_state_next = self.state_trafo(self.context_state_next, context_action_augm)
-
-        # latent representation
-        self.context_phi = self.model(context_state, context_action_augm)  # latent space
-        self.context_phi_next = self.model(context_state_next, context_action_augm)  # latent space
-
         # placeholders predictive data ====================================================
-        ## prediction data
-        self.state = tf.placeholder(shape=[None, self.state_dim], dtype = tf.float32, name='state') # input
-        self.state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
-        self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
-        self.done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
-        self.reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
+        with tf.variable_scope("prediction", reuse=tf.AUTO_REUSE):
+            # prediction data
+            self.state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
+            self.state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='next_state')  # input
+            self.action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
+            self.reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
+            self.done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
 
-        # append action s.t. it is an input to the network
-        (bs, _) = tf.unstack(tf.to_int32(tf.shape(self.state)))
-        action_augm = tf.range(self.action_dim, dtype=tf.int32)
-        action_augm = tf.tile(action_augm, [bs])
-        state = self.state_trafo(self.state, action_augm)
-        state_next = self.state_trafo(self.state_next, action_augm)
+            # prepare action to concatenate after first hidden layer
+            (bs, _) = tf.unstack(tf.to_int32(tf.shape(self.state)))
+            action_augm = tf.range(self.action_dim, dtype=tf.int32)
+            action_augm = tf.tile(action_augm, [bs])
 
-        # latent representation
-        self.phi = self.model(state, action_augm) # latent space
-        self.phi_next = self.model(state_next, action_augm)  # latent space
+            # noise variance
+            self.Sigma_e = 1. / self.nprec * tf.ones(bs, name='noise_precision')
 
-        # noise variance
-        self.Sigma_e_context = 1. / self.nprec * tf.ones(bsc, name='noise_precision')
-        self.Sigma_e = 1. / self.nprec * tf.ones(bs, name='noise_precision')
+        ## latent representation
+        self.phi = self.model(self.state, action_augm)  # latent space
+        self.phi_next = self.model(self.state_next, action_augm)  # latent space
 
-        # output layer (Bayesian) =========================================================
-        # prior (updated via GD) ---------------------------------------------------------
-        self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim,1])
-        self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32, initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
-        L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
-        self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
+        # placeholders context data =======================================================
+        with tf.variable_scope("conditioning", reuse=tf.AUTO_REUSE):
+            # conditioning data
+            self.context_state = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name='state')  # input
+            self.context_state_next = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32,
+                                                     name='next_state')  # input
+            self.context_action = tf.placeholder(shape=[None], dtype=tf.int32, name='action')
+            self.context_reward = tf.placeholder(shape=[None], dtype=tf.float32, name='reward')
+            self.context_done = tf.placeholder(shape=[None], dtype=tf.float32, name='done')
 
-        self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
-        self.Qout = tf.einsum('jm,bjk->bk', self.wt, self.phi, name='Qout')
+            # append action s.t. it is an input to the network
+            (bsc, _) = tf.unstack(tf.to_int32(tf.shape(self.context_state)))
+            context_action_augm = tf.range(self.action_dim, dtype=tf.int32)
+            context_action_augm = tf.tile(context_action_augm, [bsc])
 
-        # posterior (analytical update) --------------------------------------------------
-        context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim, dtype=tf.float32)
-        self.context_phi_taken = tf.reduce_sum(tf.multiply(self.context_phi, context_taken_action), axis=2)
+            # noise variance
+            self.Sigma_e_context = 1. / self.nprec * tf.ones(bsc, name='noise_precision')
 
-        taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
-        phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
+        ## latent representation
+        self.context_phi = self.model(self.context_state, context_action_augm)  # latent space
+        self.context_phi_next = self.model(self.context_state_next, context_action_augm)  # latent space
 
-        # update posterior if there is data
-        self.wt_bar, self.Lt_inv = tf.cond(bsc > 0,
-                                           lambda: self._max_posterior(self.context_phi_next, self.context_phi_taken,
-                                                                       self.context_reward),
-                                           lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+        with tf.variable_scope("Bayesian", reuse=tf.AUTO_REUSE):
+            # Bayesian layer
+            self.w0_bar = tf.get_variable('w0_bar', dtype=tf.float32, shape=[self.latent_dim, 1])
+            self.L0_asym = tf.get_variable('L0_asym', dtype=tf.float32,
+                                           initializer=tf.sqrt(self.cprec) * tf.ones(self.latent_dim))  # cholesky
+            L0_asym = tf.linalg.diag(self.L0_asym)  # cholesky
+            self.L0 = tf.matmul(L0_asym, tf.transpose(L0_asym))  # \Lambda_0
 
-        self.sample_prior = self._sample_prior()
-        self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
+            self.wt = tf.get_variable('wt', shape=[self.latent_dim, 1], trainable=False)
+            self.Qout = tf.einsum('lm,bla->ba', self.wt, self.phi, name='Qout')  # exploration
+
+            # posterior (analytical update) --------------------------------------------------
+            context_taken_action = tf.one_hot(tf.reshape(self.context_action, [-1, 1]), self.action_dim,
+                                              dtype=tf.float32)
+            context_taken_action = tf.tile(context_taken_action, [1, self.latent_dim, 1])
+            self.context_phi_taken = tf.reduce_sum(tf.multiply(self.context_phi, context_taken_action), axis=2)
+
+            taken_action = tf.one_hot(tf.reshape(self.action, [-1, 1]), self.action_dim, dtype=tf.float32)
+            taken_action = tf.tile(taken_action, [1, self.latent_dim, 1])
+            phi_taken = tf.reduce_sum(tf.multiply(self.phi, taken_action), axis=2)
+
+            # update posterior if there is data
+            self.wt_bar, self.Lt_inv = tf.cond(bsc > 0,
+                                               lambda: self._max_posterior(self.context_phi_next,
+                                                                           self.context_phi_taken,
+                                                                           self.context_reward),
+                                               lambda: (self.w0_bar, tf.linalg.inv(self.L0)))
+            # sample prior
+            self.sample_prior = self._sample_prior()
+            # sample posterior
+            with tf.control_dependencies([self.wt_bar, self.Lt_inv]):
+                self.sample_post = self._sample_posterior(tf.reshape(self.wt_bar, [-1, 1]), self.Lt_inv)
 
         # loss function ==================================================================
         # current state -------------------------------------
@@ -187,8 +186,10 @@ class QNetwork():
         self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff, name='loss')
         self.loss2 = logdet_Sigma
 
+        self.loss_reg = tf.losses.get_regularization_loss()
+
         # tf.losses.huber_loss(labels, predictions, delta=100.)
-        self.loss = self.loss1+ self.loss2
+        self.loss = self.loss1+ self.loss2+ self.regularizer* self.loss_reg
 
         # optimizer
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr_placeholder, beta1=0.9)

@@ -25,11 +25,11 @@ tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
 tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
 tf.flags.DEFINE_float("gamma", 0.9, "Discount factor")
 
-tf.flags.DEFINE_float("learning_rate", 5e-2, "Initial learning rate")
-tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("learning_rate", 5e-3, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.0005, "Drop of learning rate per episode")
 
 tf.flags.DEFINE_float("prior_precision", 0.2, "Prior precision (1/var)")
-tf.flags.DEFINE_float("noise_precision", 10., "Noise precision (1/var)") # increase
+tf.flags.DEFINE_float("noise_precision", 1., "Noise precision (1/var)") # increase
 tf.flags.DEFINE_float("noise_precmax", 10.0, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
@@ -50,9 +50,11 @@ tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target net
 
 tf.flags.DEFINE_integer("replay_memory_size", 100, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 200, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 400, "Store images every N-th episode")
 tf.flags.DEFINE_float("regularizer", 0.01, "Regularization parameter")
 tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
+
+tf.flags.DEFINE_float("rew_mag", 1.0, "Scaling of reward")
 
 tf.flags.DEFINE_integer("random_seed", 1234, "Random seed for numpy and tensorflow")
 
@@ -107,10 +109,11 @@ def plot_Valuefcn_confidence(Valuefcn, dValuefcn, target, save_path, states=np.a
     # normalize
     # Valuefcn/= np.mean(Valuefcn, axis=1)[:, None]
     # dValuefcn/= np.mean(Valuefcn, axis=1)[:, None]
-
+    final_idx = 7
+    plot_size = 5
     #
-    fig, ax = plt.subplots(figsize=[8, 4], nrows=6)
-    for s in range(5):
+    fig, ax = plt.subplots(figsize=[8, 4], nrows=plot_size)
+    for s in range(4):
         ax[s].plot(np.arange(9), Valuefcn[s], c='b')
         lower = Valuefcn[s]- 1.96* np.sqrt(dValuefcn[s])
         upper = Valuefcn[s]+ 1.96* np.sqrt(dValuefcn[s])
@@ -123,15 +126,15 @@ def plot_Valuefcn_confidence(Valuefcn, dValuefcn, target, save_path, states=np.a
         #ax[s].set_ylim([0.7* np.min(Valuefcn[s]), 1.3* np.max(Valuefcn[s])])
         #ax[s].set_yticks([])
 
-    ax[5].plot(np.arange(9), Valuefcn[10], c='b')
-    lower = Valuefcn[10] - 1.96 * np.sqrt(dValuefcn[10])
-    upper = Valuefcn[10] + 1.96 * np.sqrt(dValuefcn[10])
-    ax[5].fill_between(np.arange(9), lower, upper, alpha=0.5)
-    ax[5].plot([target, target], [np.min(lower), np.max(upper)], c='r')
-    pos = np.argmax(states[10])
-    ax[5].plot([pos, pos], [np.min(lower), np.max(upper)], c='b')  # imshow makes y-axis pointing downwards
+    ax[plot_size-1].plot(np.arange(9), Valuefcn[final_idx], c='b')
+    lower = Valuefcn[final_idx] - 1.96 * np.sqrt(dValuefcn[final_idx])
+    upper = Valuefcn[final_idx] + 1.96 * np.sqrt(dValuefcn[final_idx])
+    ax[plot_size-1].fill_between(np.arange(9), lower, upper, alpha=0.5)
+    ax[plot_size-1].plot([target, target], [np.min(lower), np.max(upper)], c='r')
+    pos = np.argmax(states[final_idx])
+    ax[plot_size-1].plot([pos, pos], [np.min(lower), np.max(upper)], c='b')  # imshow makes y-axis pointing downwards
 
-    ax[5].set_xticks([])
+    ax[plot_size-1].set_xticks([])
     #ax[4].set_ylim([0.7 * np.min(Valuefcn[7]), 1.3 * np.max(Valuefcn[7])])
     # ax[s].set_yticks([])
 
@@ -139,9 +142,12 @@ def plot_Valuefcn_confidence(Valuefcn, dValuefcn, target, save_path, states=np.a
     plt.close()
 
 def plot_Value_Paper(Valuefcn, target, save_path, states=np.array([]), steps=7):
+
+    final_idx = 7
+    plot_size = 5
     #
-    fig, ax = plt.subplots(figsize=[8, 6], nrows=5)
-    for s in range(4):
+    fig, ax = plt.subplots(figsize=[8, 6], nrows=plot_size)
+    for s in range(plot_size-1):
         c_low = np.floor(np.min(Valuefcn[s]))
         c_up = np.ceil(np.max(Valuefcn[s]))
         im = ax[s].imshow(Valuefcn[s].reshape(1,-1))
@@ -154,15 +160,15 @@ def plot_Value_Paper(Valuefcn, target, save_path, states=np.array([]), steps=7):
         cb = fig.colorbar(im, ax=ax[s], shrink=0.55, orientation="vertical", pad=0.1, aspect=1, format='%.0f')
         cb.set_ticks([c_low+1, c_up-1])
 
-    c_low = np.floor(1.1 * np.min(Valuefcn[7]))
-    c_up = np.ceil(0.9 * np.max(Valuefcn[7]))
-    im = ax[4].imshow(Valuefcn[7].reshape(1, -1), vmin=c_low, vmax=c_up)
-    ax[4].plot(target, 0, 'ro', markersize=20)
-    pos = np.argmax(states[7])
-    ax[4].plot(pos, 0., 'bo', markersize=20)  # imshow makes y-axis pointing downwards
-    ax[4].set_xticks([])
-    ax[4].set_yticks([])
-    im.set_clim(np.min(Valuefcn[7]), np.max(Valuefcn[7]))
+    c_low = np.floor(1.1 * np.min(Valuefcn[final_idx]))
+    c_up = np.ceil(0.9 * np.max(Valuefcn[final_idx]))
+    im = ax[plot_size-1].imshow(Valuefcn[final_idx].reshape(1, -1), vmin=c_low, vmax=c_up)
+    ax[plot_size-1].plot(target, 0, 'ro', markersize=20)
+    pos = np.argmax(states[final_idx])
+    ax[plot_size-1].plot(pos, 0., 'bo', markersize=20)  # imshow makes y-axis pointing downwards
+    ax[plot_size-1].set_xticks([])
+    ax[plot_size-1].set_yticks([])
+    im.set_clim(np.min(Valuefcn[final_idx]), np.max(Valuefcn[final_idx]))
 
     fig.subplots_adjust(right=0.8)
     cb = fig.colorbar(im, ax=ax[4], shrink=0.55, orientation="vertical", pad=0.1, aspect=1, format='%.0f')
@@ -170,7 +176,7 @@ def plot_Value_Paper(Valuefcn, target, save_path, states=np.array([]), steps=7):
 
     plt.tight_layout()
 
-    plt.savefig(save_path+'_'+str(np.int(np.min(Valuefcn)))+ '_'+ str(np.int(np.max(Valuefcn))))
+    plt.savefig(save_path)
     plt.close()
 
 
@@ -239,6 +245,7 @@ log.info('Build Tensorflow Graph')
 
 # initialize environment
 env = environment(FLAGS.state_space)
+env.rew_mag = FLAGS.rew_mag
 
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
@@ -338,7 +345,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                     state_train = np.zeros([step + 1, FLAGS.state_space])
                     next_state_train = np.zeros([step + 1, FLAGS.state_space])
                     action_train = np.zeros([step + 1, ])
-                    done_train = np.zeros([step + 1, 1])
+                    done_train = np.zeros([step + 1])
 
                     # fill arrays
                     for k, experience in enumerate(tempbuffer.buffer):
@@ -510,7 +517,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             batch_size *= 2
 
         # learning rate schedule
-        if learning_rate > 5e-5:
+        if learning_rate > 1e-5:
             learning_rate /= FLAGS.lr_drop
 
         if noise_precision < FLAGS.noise_precmax and episode % FLAGS.noise_Ndrop == 0:
@@ -569,7 +576,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                         state_train = np.zeros([step+1, FLAGS.state_space])
                         next_state_train = np.zeros([step+1, FLAGS.state_space])
                         action_train = np.zeros([step+1, ])
-                        done_train = np.zeros([step+1, 1])
+                        done_train = np.zeros([step+1])
 
                         # fill arrays
                         for k, experience in enumerate(evalbuffer.buffer):
