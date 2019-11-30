@@ -30,8 +30,8 @@ class PushEnv(gym.Env):
         # target position
         self.target_position = np.r_[0.8 * self.maxp, 0.5 * self.maxp]
 
-        self.low = np.r_[self.minp, self.minp, -self.maxv, -self.maxv, -0.2*self.maxp, -0.2*self.maxp]#, -self.maxv, -self.maxv]
-        self.high = np.r_[self.maxp, self.maxp, +self.maxv, +self.maxv, 0.2*self.maxp, 0.2*self.maxp]#, +self.maxv, +self.maxv]
+        self.low = np.r_[self.minp, self.minp, -self.maxv, -self.maxv, -0.2*self.maxp, -0.2*self.maxp, -self.maxv, -self.maxv]
+        self.high = np.r_[self.maxp, self.maxp, +self.maxv, +self.maxv, 0.2*self.maxp, 0.2*self.maxp, +self.maxv, +self.maxv]
 
         # parameters for the simulation
         self.velocity_increment = 0.04
@@ -69,12 +69,13 @@ class PushEnv(gym.Env):
         p.loadURDF("plane.urdf")
 
         # displacement
-        displacement = (0.3+ np.random.rand()* 0.4) * self.maxp
+        self.displacement = (0.3+ np.random.rand()* 0.4) * self.maxp
+        self.offset_EE = 0.01*(-0.5 + np.random.rand())
 
         # load manipulation object
-        self.object_id = p.loadURDF("urdfs/cuboid1.urdf", [0.05, displacement, 0.01])
+        self.object_id = p.loadURDF("urdfs/cuboid1.urdf", [0.05, self.displacement, 0.01])
         # load manipulator
-        self.robot_position = np.r_[0.02, displacement+ 0.00*(-0.5 + np.random.rand()), 0.03] # XXXX
+        self.robot_position = np.r_[0.02, self.displacement+ self.offset_EE, 0.03] # XXXX
         rot = Rotation.from_rotvec(np.r_[0.0, 1.0, 0.0] * 0.5 * np.pi)
         self.robot_id = p.loadURDF("urdfs/cylinder.urdf", self.robot_position, rot.as_quat())
 
@@ -83,8 +84,8 @@ class PushEnv(gym.Env):
                                                  [0., 0., 0.], self.robot_position, [0., 0., 0., 1.0], rot.as_quat())
 
         # object COM offset
-        offset = 0.02*(-1. + 2.* np.random.rand())
-        self.obj_offset_COM_local = np.array([0., offset])
+        self.offset_COM = 0.02*(-1. + 2.* np.random.rand())
+        self.obj_offset_COM_local = np.array([0., self.offset_COM])
 
         # reset velocity vector
         self.velocity_vector = np.zeros(2)
@@ -123,8 +124,8 @@ class PushEnv(gym.Env):
         #if np.linalg.norm(obs[:2]- obs[4:6]) > 0.2* self.maxp:
         #    done = True
 
-        # calculate reward
-        reward = .01 / (.01 + np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)) # 1/ dist(object_to_target)
+        # calculate reward 0.01
+        reward = 10.* self.rew_scale / (self.rew_scale + np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)) # 1/ dist(object_to_target)
         #reward = self.rew_scale* (0.3- np.linalg.norm(obs[4:6] - self.target_position))
 
         return obs, reward, done, {}
@@ -141,11 +142,15 @@ class PushEnv(gym.Env):
         pos_object_COM = np.asarray(pos_object[:2])+ obj_offset_COM_global
         pos_object_COM -= pos_robot[:2]
 
-        vel_lin, vel_rot = p.getBaseVelocity(self.robot_id)
+        vel_object_lin, _ = p.getBaseVelocity(self.object_id)
+        vel_robot_lin, _ = p.getBaseVelocity(self.robot_id)
+        
+        vel_object = np.asarray(vel_object_lin[:2])- np.asarray(vel_robot_lin[:2])
 
         return np.concatenate([np.asarray(pos_robot[:2]),
-                               np.asarray(self.velocity_vector),
-                               pos_object_COM])
+                               self.velocity_vector,
+                               pos_object_COM,
+                               vel_object])
 
 if __name__ == '__main__':
     # for some basic tests
@@ -161,7 +166,7 @@ if __name__ == '__main__':
 
     for i in range(30):
         # action = np.random.uniform(0.0, 1.0, (5,))
-        action = [3 if step < 20 else 2][0]
+        action = [3 if step < 50 else 2][0]
         obs, reward, _, _ = env.step(action)
         obs, reward, _, _ = env.step(action)
         step += 1

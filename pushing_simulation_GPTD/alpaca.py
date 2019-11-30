@@ -22,8 +22,8 @@ gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.13)
 # General Hyperparameters
 # general
 tf.flags.DEFINE_integer("batch_size", 2, "Batch size for training")
-tf.flags.DEFINE_float("gamma", 0.95, "Discount factor")
-tf.flags.DEFINE_integer("N_episodes", 13000, "Number of episodes")
+tf.flags.DEFINE_float("gamma", 0.90, "Discount factor")
+tf.flags.DEFINE_integer("N_episodes", 30000, "Number of episodes")
 tf.flags.DEFINE_integer("N_tasks", 2, "Number of tasks")
 tf.flags.DEFINE_integer("L_episode", 50, "Length of episodes")
 
@@ -35,12 +35,12 @@ tf.flags.DEFINE_integer("nstep", 1, "n-step TD return")
 
 # domain
 tf.flags.DEFINE_integer("action_space", 7, "Dimensionality of action space")  # only x-y currently
-tf.flags.DEFINE_integer("state_space", 6, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
+tf.flags.DEFINE_integer("state_space", 8, "Dimensionality of state space")  # [x,y,theta,vx,vy,vtheta]
 
 # posterior
 tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
 tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
-tf.flags.DEFINE_float("noise_precmax", 10.0, "Maximum noise precision (1/var)")
+tf.flags.DEFINE_float("noise_precmax", 30.0, "Maximum noise precision (1/var)")
 tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
 tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
@@ -55,24 +55,24 @@ tf.flags.DEFINE_float("eps_final", 0., "Final value for epsilon-greedy")
 tf.flags.DEFINE_float("eps_step", 0.9997, "Multiplicative step for epsilon-greedy")
 
 # target
-tf.flags.DEFINE_float("tau", 0.01, "Update speed of target network")
+tf.flags.DEFINE_float("tau", 0.008, "Update speed of target network")
 tf.flags.DEFINE_integer("update_freq_target", 1, "Update frequency of target network")
 
 # loss
-tf.flags.DEFINE_float("learning_rate", 1e-2, "Initial learning rate") # X 5e-3
-tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode") # 3
-tf.flags.DEFINE_float("lr_final", 2e-4, "Final learning rate")
+tf.flags.DEFINE_float("learning_rate", 5e-2, "Initial learning rate")
+tf.flags.DEFINE_float("lr_drop", 1.0003, "Drop of learning rate per episode")
+tf.flags.DEFINE_float("lr_final", 1e-4, "Final learning rate")
 tf.flags.DEFINE_float("grad_clip", 1e4, "Absolute value to clip gradients")
 tf.flags.DEFINE_float("huber_d", 1e1, "Switch point from quadratic to linear")
 tf.flags.DEFINE_float("regularizer", 1e-2, "Regularization parameter") # X
 
 # reward
-tf.flags.DEFINE_float("rew_norm", 1e0, "Normalization factor for reward")
+tf.flags.DEFINE_float("rew_norm", 1e-2, "Normalization factor for reward")
 
 # memory
 tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
 tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
-tf.flags.DEFINE_integer("save_frequency", 300, "Store images every N-th episode")
+tf.flags.DEFINE_integer("save_frequency", 50, "Store images every N-th episode")
 
 #
 tf.flags.DEFINE_integer("random_seed", 2345, "Random seed for numpy and tensorflow")
@@ -190,10 +190,14 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
     # report mean reward per episode
     reward_episode = []
-
+ 
     # timing
     time_env = []
     time_sgd = []
+
+    # target distance vs COM offset
+    target_COM = []
+
 
     # -----------------------------------------------------------------------------------
     # fill replay memory with random transitions
@@ -283,7 +287,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
                 td_accum += factor* np.abs(Qval[action]- reward - gamma* np.max(Qnew))
 
                 # actual reward
-                rw.append(reward/ FLAGS.rew_norm)
+                rw.append(1.*reward/ FLAGS.rew_norm)
                 action_task.append(action)
                 speed_task.append(np.linalg.norm(next_state[2:4]- state[2:4]))
 
@@ -340,6 +344,12 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             # append episode buffer to large buffer
             fullbuffer.add(td_accum, tempbuffer.buffer)
 
+            # target distance vs COM offset
+            position_object = np.array([state_train[-1, 0] + state_train[-1, 4],
+                                        state_train[-1, 1] + state_train[-1, 5]])
+            target_COM.append([np.linalg.norm(env.target_position- position_object),
+                              np.linalg.norm(env.obj_offset_COM_local)])
+
             # entropy of action selection
             _, action_count = np.unique(np.asarray(action_task), return_counts=True)
             action_prob = 1.*action_count / np.sum(action_count)
@@ -390,7 +400,7 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             summary_writer.flush()
 
         # reward in episode
-        reward_episode.append(np.sum(np.array(rw)) / FLAGS.N_tasks/ 10.)
+        reward_episode.append(np.sum(np.array(rw)) / FLAGS.N_tasks)
 
         # visual inspection ================================================================
         if episode % FLAGS.save_frequency == 0:
@@ -452,22 +462,29 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         if episode % FLAGS.save_frequency == 0:
 
             Neval = 50
-            reward_eval = 0.
+            #
+            reward_eval_post = 0.
             for n in range(Neval):
-                reward_eval+= evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, split_ratio, noise_precision)
+                reward_eval_post+= evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, split_ratio, noise_precision)
 
             reward_eval_summary = tf.Summary(
-                    value=[tf.Summary.Value(tag='Performance2/Eval Reward Posterior', simple_value=reward_eval/ FLAGS.rew_norm)])
+                    value=[tf.Summary.Value(tag='Performance2/Eval Reward Posterior', simple_value=reward_eval_post/ FLAGS.rew_norm)])
             summary_writer.add_summary(reward_eval_summary, episode)
-            summary_writer.flush()
 
-            reward_eval = 0.
+            #
+            reward_eval_prior = 0.
             for n in range(Neval):
-                reward_eval += evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, 0., noise_precision)
+                reward_eval_prior += evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, 0., noise_precision)
 
             reward_eval_summary = tf.Summary(
-                value=[tf.Summary.Value(tag='Performance2/Eval Reward Prior', simple_value=reward_eval/ FLAGS.rew_norm)])
+                value=[tf.Summary.Value(tag='Performance2/Eval Reward Prior', simple_value=reward_eval_prior/ FLAGS.rew_norm)])
             summary_writer.add_summary(reward_eval_summary, episode)
+
+            #
+            reward_eval_summary = tf.Summary(
+                value=[tf.Summary.Value(tag='Performance2/Eval Posterior - Prior', simple_value=reward_eval_post/ reward_eval_prior)])
+            summary_writer.add_summary(reward_eval_summary, episode)
+
             summary_writer.flush()
 
 
@@ -485,9 +502,13 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
             policy_plot(sess, QNet, tempbuffer, FLAGS, episode, base_dir)
 
 
-    # write reward to file
-    df = pd.DataFrame(reward_episode)
-    df.to_csv(reward_dir + 'reward_per_episode', index=False)
+            # write reward to file
+            df = pd.DataFrame(reward_episode[-FLAGS.save_frequency:])
+            df.to_csv(reward_dir + 'reward_per_episode', header=False, index=False, mode='a')
+
+            # write target distance vs COM offset to file
+            df = pd.DataFrame(target_COM[-FLAGS.save_frequency:])
+            df.to_csv(reward_dir + 'target_COM', header=False, index=False, mode='a')
 
     # reset buffers
     fullbuffer.reset()
