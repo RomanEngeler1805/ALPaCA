@@ -220,7 +220,7 @@ class QNetwork():
             self.loss1 = tf.einsum('i,ik,k->', self.Qdiff, tf.linalg.inv(tf.linalg.diag(Sigma_pred)), self.Qdiff,
                                    name='loss1')
             self.loss2 = logdet_Sigma
-            self.loss_reg = tf.losses.get_regularization_loss(scope=self.scope)
+            self.loss_reg = tf.losses.get_regularization_loss(scope=self.scope)+ tf.reduce_sum(tf.square(self.w0_bar))+ tf.reduce_sum(tf.square(self.L0_asym))
 
             self.loss_kl = -self.latent_dim + tf.linalg.logdet(self.L0) - tf.linalg.logdet(tf.linalg.inv(self.Lt_inv)) + \
                          tf.linalg.trace(tf.matmul(tf.linalg.inv(self.Lt_inv), tf.linalg.inv(self.L0))) + \
