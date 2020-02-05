@@ -136,20 +136,24 @@ class alpaca:
                 state = self.env.reset()
                 self.sess.run(self.Qmain.sample_prior)
 
+                # to avoid double inference for td error calculation
+                Qold = self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: state.reshape(-1, self.FLAGS.state_space)})[0]
+
                 for step in range(self.FLAGS.L_episode):
                     # take a step
-                    Qval = self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: state.reshape(-1, self.FLAGS.state_space)})[0]
-                    action = np.argmax(Qval)
+                    action = np.argmax(Qold)
                     next_state, reward, done, _ = self.env.step(action)
+
+                    Qnew = self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: next_state.reshape(-1, self.FLAGS.state_space)})[0]
 
                     # store experience in memory
                     new_experience = [state, action, reward, next_state, done]
                     self.tempbuffer.add(new_experience)
 
-                    # prioritized memory TODO: avoid inference
-                    Qnew = self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: next_state.reshape(-1, self.FLAGS.state_space)})[0]
+                    # prioritized memory
                     factor = 1.
-                    td_accum += factor * np.abs(Qval[action] - reward - self.gamma * np.max(Qnew))
+                    td_accum += factor * np.abs(Qold[action] - reward - self.gamma * np.max(Qnew))
+                    Qold = Qnew.copy()
 
                     # actual reward
                     rw.append(1. * reward / self.FLAGS.rew_norm)
@@ -168,28 +172,15 @@ class alpaca:
             self.fullbuffer.add(td_accum, self.tempbuffer.buffer)
 
             reward_summary = tf.Summary(
-                value=[tf.Summary.Value(tag='Performance2/Episodic Reward',
+                value=[tf.Summary.Value(tag='Training/Episodic Reward',
                                         simple_value=np.sum(np.array(rw)) / self.FLAGS.N_tasks)])
             self.summary_writer.add_summary(reward_summary, self.episode)
             self.summary_writer.flush()
 
             # gradient descent
             start = time.time()
-            #for _ in range(4):
-            #    self._optimize()
-
-            for n_grad_steps in range(4):
-                update_model(self.sess,
-                             self.Qmain,
-                             self.Qtarget,
-                             self.fullbuffer,
-                             self.summary_writer,
-                             self.FLAGS,
-                             self.episode,
-                             batch_size=self.batch_size,
-                             split_ratio=self.split_ratio,
-                             learning_rate=self.learning_rate,
-                             noise_precision=self.noise_precision)
+            for _ in range(4):
+                self._optimize()
             time_sgd.append(time.time() - start)
 
             # update target network
@@ -220,8 +211,10 @@ class alpaca:
                 print('AVG time sgd: ' + str(time_sgd))
 
                 print('Evaluation ...')
-                #self._evaluate()
+                self._evaluate()
+                self._prior_rollouts()
                 self._summary()
+                print('Training ...')
 
         # write reward to file
         df = pd.DataFrame(self.reward_training)
@@ -232,66 +225,115 @@ class alpaca:
         df.to_csv(self.reward_dir + 'target_COM', header=False, index=False, mode='a')
 
         #
-        self.reset()
+        self._reset()
 
 
-    def _evaluate(self):
+    def _evaluate(self, updates=True):
         '''
         evaluate performance on new instances w/o GD updates
         '''
 
-        action_task = []  # action distribution
-        entropy_episode = []  # entropy of action
-        target_distance = []  # distance to target
+        # define configurations to test
+        displacement_x = 0.03
+        displacement_y = (0.3+ np.array([0., 0.5, 1.])* 0.4) * self.env.maxp
+        offset_EE_y = 0.01 * (-0.5 + np.array([0., 0.5, 1.]))
+        offset_COM_y = 0.02 * (-1. + 2. * np.array([0., 0.5, 1.]))
+
+        target_COM_distance = []  # distance to target
+        target_EE_distance = []
+        EE_COM_distance = []
+        episode_length = []
         max_speed = []  # speed achieved
+        speed_task = []
         rw = []
+        final_y = []
+        final_x = []
+        termination = np.zeros(8)
 
-        self.evalbuffer.reset()
-        state = self.env.reset()
-        self.sess.run(self.Qmain.sample_prior)
-        done = False
+        for dy in range(3): # displacement_y
+            for ey in range(3): # offset_EE_y
+                for cy in range(3): # offset_COM_y
+                    # reset buffer and model
+                    self.evalbuffer.reset()
+                    self.sess.run(self.Qmain.sample_prior)
 
-        for step in range(self.FLAGS.L_episode):
-            # take a step
-            Qval = self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: state.reshape(-1, self.FLAGS.state_space)})[0]
-            action = np.argmax(Qval)
-            next_state, reward, done, _ = self.env.step(action)
+                    # configurations
+                    state = self.env.reset(displacement_x,
+                                           displacement_y[dy],
+                                           offset_EE_y[ey],
+                                           offset_COM_y[cy])
 
-            # store experience in memory
-            new_experience = [state, action, reward, next_state, done]
-            self.evalbuffer.add(new_experience)
+                    for step in range(self.FLAGS.L_episode):
+                        # take a step
+                        Qval = self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: state.reshape(-1, self.FLAGS.state_space)})[0]
+                        action = np.argmax(Qval)
+                        next_state, reward, done, _ = self.env.step(action)
 
-            # prioritized memory TODO: avoid inference
-            Qnew = \
-            self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: next_state.reshape(-1, self.FLAGS.state_space)})[0]
+                        # store experience in memory
+                        new_experience = [state, action, reward, next_state, done]
+                        self.evalbuffer.add(new_experience)
 
-            # actual reward
-            rw.append(1. * reward / self.FLAGS.rew_norm)
-            action_task.append(action)
-            #speed_task.append(np.linalg.norm(next_state[2:4] - state[2:4]))
+                        # actual reward
+                        rw.append(1. * reward / self.FLAGS.rew_norm)
+                        speed_task.append(np.linalg.norm(next_state[2:4] - state[2:4]))
 
-            # update state, and counters
-            state = next_state.copy()
+                        # update state, and counters
+                        state = next_state.copy()
 
-            if done: break;
+                        if done:
+                            termination += next_state < self.env.low
+                            termination += next_state > self.env.high
+                            break
 
-            if step == 0:
-                wt_bar, Lt = self.sess.run([self.Qmain.w0_bar, self.Qmain.L0])
-                # generate_posterior_plots(sess, QNet, wt_bar, np.linalg.inv(Lt),
-                #                         base_dir, tempbuffer, FLAGS,
-                #                         episode, step)
+                        #if step == 0:
+                        #wt_bar, Lt = self.sess.run([self.Qmain.w0_bar, self.Qmain.L0])
+                        # generate_posterior_plots(sess, QNet, wt_bar, np.linalg.inv(Lt),
+                        #                         base_dir, tempbuffer, FLAGS,
+                        #                         episode, step)
 
-            if (step + 1) % self.FLAGS.update_freq_post == 0 and step < self.split_ratio * self.FLAGS.L_episode:
-                wt_bar, Lt_inv = self._posterior()
+                        if (step + 1) % self.FLAGS.update_freq_post == 0\
+                                and step < self.split_ratio * self.FLAGS.L_episode\
+                                and updates:
+                            wt_bar, Lt_inv = self._posterior()
 
-                #generate_posterior_plots(self.sess, self.Qmain, wt_bar, Lt_inv,
-                #                             self.base_dir, self.tempbuffer, self.FLAGS,
-                #                             self.episode, step)
+                            #generate_posterior_plots(self.sess, self.Qmain, wt_bar, Lt_inv,
+                            #                             self.base_dir, self.tempbuffer, self.FLAGS,
+                            #                             self.episode, step)
+
+                    target_COM_distance.append(np.linalg.norm(self.env.target_position- state[:2]- state[4:6]))
+                    target_EE_distance.append(np.linalg.norm(self.env.target_position - state[:2]))
+                    EE_COM_distance.append(np.linalg.norm(state[4:6]))
+                    episode_length.append(step)
+                    final_x.append(state[0]+ state[4])
+                    final_y.append(state[1] + state[5])
+
+        print('p_rob, v_rob, p_obj, v_obj')
+        print(termination)
 
         # tensorflow summaries
-        reward_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Validation/Episodic Reward', simple_value=np.sum(np.array(rw)))])
+        rw = np.sum(np.array(rw))/ len(displacement_y)/ len(offset_EE_y)/ len(offset_COM_y)
+        reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation/Episodic Reward', simple_value=rw)])
+        target_COM_distance = np.mean(np.array(target_COM_distance))
+        dist_COM_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation/Target COM Distance', simple_value=target_COM_distance)])
+        target_EE_distance = np.mean(np.array(target_EE_distance))
+        dist_EE_summary = tf.Summary(
+            value=[tf.Summary.Value(tag='Validation/Target EE Distance', simple_value=target_EE_distance)])
+        EE_COM_distance = np.mean(np.array(EE_COM_distance))
+        dist_EE_COM_summary = tf.Summary(
+            value=[tf.Summary.Value(tag='Validation/EE COM Distance', simple_value=EE_COM_distance)])
+        ep_len_summary = tf.Summary(
+            value=[tf.Summary.Value(tag='Validation/Episode Length', simple_value=np.mean(np.array(episode_length)))])
+        final_x_summary = tf.Summary(
+            value=[tf.Summary.Value(tag='Validation/x position', simple_value=np.mean(np.array(final_x)))])
+        final_y_summary = tf.Summary(
+            value=[tf.Summary.Value(tag='Validation/y position', simple_value=np.mean(np.array(final_y)))])
         self.summary_writer.add_summary(reward_summary, self.episode)
+        self.summary_writer.add_summary(dist_COM_summary, self.episode)
+        self.summary_writer.add_summary(dist_EE_summary, self.episode)
+        self.summary_writer.add_summary(dist_EE_COM_summary, self.episode)
+        self.summary_writer.add_summary(ep_len_summary, self.episode)
+        self.summary_writer.add_summary(final_x_summary, self.episode)
+        self.summary_writer.add_summary(final_y_summary, self.episode)
         self.summary_writer.flush()
 
         '''
@@ -305,37 +347,9 @@ class alpaca:
         action_prob = 1. * action_count / np.sum(action_count)
         entropy_episode.append(np.sum([-p * np.log(p) for p in action_prob if p != 0.]))
 
-        # final distance to target
-        target_distance.append(np.linalg.norm(self.env.target_position - state[:2] - state[4:6]))
-
         # maximum speed of robot arm
         speed_task = np.asarray(speed_task)
         max_speed.append(np.max(speed_task) * self.env.control_hz)
-
-        # tensorflow summaries
-        reward_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Validation/Episodic Reward',
-                                    simple_value=np.sum(np.array(rw)) / FLAGS.N_tasks)])
-        distance_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Validation/Target Distance',
-                                    simple_value=np.mean(np.asarray(target_distance)) / FLAGS.N_tasks)])
-        speed_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Validation/Max Speed',
-                                    simple_value=np.mean(np.asarray(max_speed)) / FLAGS.N_tasks)])
-        act_entropy_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Exploration-Exploitation/Entropy action',
-                                    simple_value=np.mean(np.asarray(entropy_episode)))])
-        len_traj_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Exploration-Exploitation/Trajectory Length', simple_value=step)])
-        self.summary_writer.add_summary(reward_summary, self.episode)
-        self.summary_writer.add_summary(distance_summary, self.episode)
-        self.summary_writer.add_summary(speed_summary, self.episode)
-        self.summary_writer.add_summary(act_entropy_summary, self.episode)
-        self.summary_writer.add_summary(len_traj_summary, self.episode)
-        self.summary_writer.flush()
-        print('Reward in Episode ' + str(self.episode) + ':   ' + str(np.sum(rw)))
-        print('Learning_rate: ' + str(np.round(self.learning_rate, 5)) + ', Nprec: ' + str(
-            noise_precision) + ', Split ratio: ' + str(np.round(self.split_ratio, 2)))
 
         generate_plots(sess, summary_writer, base_dir, tempbuffer, FLAGS, episode)
 
@@ -355,18 +369,6 @@ class alpaca:
         for n in range(Neval):
             reward_eval_prior += evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, 0., noise_precision)
 
-        reward_eval_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Performance2/Eval Reward Prior',
-                                    simple_value=reward_eval_prior / FLAGS.rew_norm)])
-        summary_writer.add_summary(reward_eval_summary, episode)
-
-        #
-        reward_eval_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Performance2/Eval Posterior - Prior',
-                                    simple_value=reward_eval_post / reward_eval_prior)])
-        summary_writer.add_summary(reward_eval_summary, episode)
-
-        summary_writer.flush()
 
         log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
 
@@ -374,6 +376,67 @@ class alpaca:
         value_function_plot(sess, QNet, tempbuffer, FLAGS, episode, base_dir)
         policy_plot(sess, QNet, tempbuffer, FLAGS, episode, base_dir)
         '''
+
+    def _prior_rollouts(self):
+        '''
+        function to plot rollouts of prior (i.e. w/o posterior updates)
+        '''
+
+        # define configurations to test
+        displacement_x = 0.03
+        displacement_y = 0.5 * self.env.maxp
+        offset_EE_y = 0.
+        offset_COM_y = 0.
+
+        #
+        buffer = []
+
+        # rollouts
+        for _ in np.arange(10):
+            self.evalbuffer.reset()
+            self.sess.run(self.Qmain.sample_prior)
+
+            # configurations
+            state = self.env.reset(displacement_x,
+                                   displacement_y,
+                                   offset_EE_y,
+                                   offset_COM_y)
+
+            for step in range(self.FLAGS.L_episode):
+                # take a step
+                Qval = self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: state.reshape(-1, self.FLAGS.state_space)})[0]
+                action = np.argmax(Qval)
+                next_state, reward, done, _ = self.env.step(action)
+
+                # store experience in memory
+                self.evalbuffer.add(state)
+
+                # update state, and counters
+                state = next_state.copy()
+
+                if done:
+                    break
+
+            buffer.append(self.evalbuffer.buffer)
+
+        fig, ax = plt.subplots(ncols=2, figsize=[10, 4])
+        ax[0].set_title('End-Effector')
+        ax[1].set_title('Object')
+        for num, rollout in enumerate(buffer):
+            rollout = np.asarray(rollout)
+            ax[0].plot(rollout[:,0], rollout[:,1], color=plt.cm.cool(num* 25))
+            ax[1].plot(rollout[:,0]+ rollout[:,4],
+                       rollout[:,1]+ rollout[:,5],
+                       color=plt.cm.cool(num* 25))
+
+        ax[0].set_xlim([0, 0.8])
+        ax[0].set_ylim([0, 0.8])
+        ax[1].set_xlim([0, 0.8])
+        ax[1].set_ylim([0, 0.8])
+        plt.savefig(self.policy_dir+ '/Rollout_'+ str(self.episode))
+        plt.show()
+
+
 
     def _reset(self):
         self.sess.close()
