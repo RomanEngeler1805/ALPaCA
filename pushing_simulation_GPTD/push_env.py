@@ -21,17 +21,15 @@ class PushEnv(gym.Env):
         
         # domain boundaries
         self.minp = 0.0
-        self.maxp = 0.4
+        self.maxp = 0.8
 
         self.maxv = 1.5
 
-        self.arm_length = 0.5 * self.maxp
-        self.deacceleration = 0.4
         # target position
         self.target_position = np.r_[0.8 * self.maxp, 0.5 * self.maxp]
 
-        self.low = np.r_[self.minp, self.minp, -self.maxv, -self.maxv, -0.2*self.maxp, -0.2*self.maxp, -self.maxv, -self.maxv]
-        self.high = np.r_[self.maxp, self.maxp, +self.maxv, +self.maxv, 0.2*self.maxp, 0.2*self.maxp, +self.maxv, +self.maxv]
+        self.low = np.r_[self.minp, self.minp, -self.maxv, -self.maxv, -0.4*self.maxp, -0.4*self.maxp, -self.maxv, -self.maxv]
+        self.high = np.r_[self.maxp, self.maxp, +self.maxv, +self.maxv, 0.4*self.maxp, 0.4*self.maxp, +self.maxv, +self.maxv]
 
         # parameters for the simulation
         self.velocity_increment = 0.04
@@ -60,7 +58,11 @@ class PushEnv(gym.Env):
 
         self.reset()
 
-    def reset(self):
+    def reset(self,
+              displacement_x=None,
+              displacement_y=None,
+              offset_EE_y=None,
+              offset_COM_y=None):
         # reset simulation
         p.resetSimulation()
         p.setGravity(0.0, 0.0, -10.0)
@@ -69,13 +71,16 @@ class PushEnv(gym.Env):
         p.loadURDF("plane.urdf")
 
         # displacement
-        displacement_y = (0.3+ np.random.rand()* 0.4) * self.maxp
-        displacement_x = 0.02+ 0.15* np.random.rand()
+        if displacement_x is None:
+            displacement_x = 0.02 + 0.15 * np.random.rand()  # x position of EE
+            displacement_y = (0.3+ np.random.rand()* 0.4) * self.maxp # y position of EE
+            offset_EE_y = 0.01*(-0.5 + np.random.rand())
+            offset_COM_y = 0.02 * (-1. + 2. * np.random.rand()) # XXXX
 
         # load manipulation object
         self.object_id = p.loadURDF("urdfs/cuboid1.urdf", [0.03+ displacement_x, displacement_y, 0.01])
         # load manipulator
-        self.robot_position = np.r_[displacement_x, displacement_y+ 0.01*(-0.5 + np.random.rand()), 0.03] # XXXX
+        self.robot_position = np.r_[displacement_x, displacement_y+ offset_EE_y, 0.03] # XXXX
         rot = Rotation.from_rotvec(np.r_[0.0, 1.0, 0.0] * 0.5 * np.pi)
         self.robot_id = p.loadURDF("urdfs/cylinder.urdf", self.robot_position, rot.as_quat())
 
@@ -84,8 +89,7 @@ class PushEnv(gym.Env):
                                                  [0., 0., 0.], self.robot_position, [0., 0., 0., 1.0], rot.as_quat())
 
         # object COM offset
-        offset = 0.02*(-1. + 2.* np.random.rand()) # XXXX
-        self.obj_offset_COM_local = np.array([0., offset])
+        self.obj_offset_COM_local = np.array([0., offset_COM_y])
 
         # reset velocity vector
         self.velocity_vector = np.zeros(2)
@@ -114,19 +118,16 @@ class PushEnv(gym.Env):
         # get observation
         obs = self._get_obs()
 
+        # calculate reward 0.01
+        #reward = 10.* self.rew_scale / (self.rew_scale + np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)) # 1/ dist(object_to_target)
+        reward = -np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)- np.linalg.norm(obs[4:6])
+
         done = False
 
         # check domain violations
         if np.any(obs < self.low) or np.any(obs > self.high):
             done = True
-
-        # if robot moves too far away from object
-        #if np.linalg.norm(obs[:2]- obs[4:6]) > 0.2* self.maxp:
-        #    done = True
-
-        # calculate reward 0.01
-        reward = 10.* self.rew_scale / (self.rew_scale + np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)) # 1/ dist(object_to_target)
-        #reward = 10.* (0.4- np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position))
+            reward = -10.
 
         return obs, reward, done, {}
 
