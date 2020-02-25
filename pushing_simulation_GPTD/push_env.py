@@ -21,21 +21,21 @@ class PushEnv(gym.Env):
         
         # domain boundaries
         self.minp = 0.0
-        self.maxp = 0.8
+        self.maxp = 0.6
 
         self.maxv = 1.5
 
         # target position
         self.target_position = np.r_[0.8 * self.maxp, 0.5 * self.maxp]
 
-        self.low = np.r_[self.minp, self.minp, -self.maxv, -self.maxv, -0.4*self.maxp, -0.4*self.maxp, -self.maxv, -self.maxv]
-        self.high = np.r_[self.maxp, self.maxp, +self.maxv, +self.maxv, 0.4*self.maxp, 0.4*self.maxp, +self.maxv, +self.maxv]
+        self.low = np.r_[self.minp, self.minp, -self.maxv, -self.maxv, -0.8*self.maxp, -0.8*self.maxp, -self.maxv, -self.maxv]
+        self.high = np.r_[self.maxp, self.maxp, +self.maxv, +self.maxv, 0.8*self.maxp, 0.8*self.maxp, +self.maxv, +self.maxv]
 
         # parameters for the simulation
         self.velocity_increment = 0.04
         self.control_hz = 30.
         self.sim_hz = 240.
-        self.max_force = 400 # force of manipulator
+        self.max_force = 400 # force of manipulator1
 
         # define spaces in gym env
         self.action_space = spaces.Discrete(1)
@@ -74,7 +74,7 @@ class PushEnv(gym.Env):
         if displacement_x is None:
             displacement_x = 0.02 + 0.15 * np.random.rand()  # x position of EE
             displacement_y = (0.3+ np.random.rand()* 0.4) * self.maxp # y position of EE
-            offset_EE_y = 0.01*(-0.5 + np.random.rand())
+            offset_EE_y = 0.005*(-1. + 2.* np.random.rand())
             offset_COM_y = 0.02 * (-1. + 2. * np.random.rand()) # XXXX
 
         # load manipulation object
@@ -120,7 +120,8 @@ class PushEnv(gym.Env):
 
         # calculate reward 0.01
         #reward = 10.* self.rew_scale / (self.rew_scale + np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)) # 1/ dist(object_to_target)
-        reward = -np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)- np.linalg.norm(obs[4:6])
+        # TODO: issue is that at some point EE-COM distance will dominate (which includes the offset)
+        reward = -np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)-  np.linalg.norm(obs[4:6])
 
         done = False
 
@@ -148,10 +149,15 @@ class PushEnv(gym.Env):
         
         vel_object = np.asarray(vel_object_lin[:2])- np.asarray(vel_robot_lin[:2])
 
-        return np.concatenate([np.asarray(pos_robot[:2]),
-                                np.asarray(vel_robot_lin[:2]),
-                               pos_object_COM,
-                               vel_object])
+        # TODO: added observation noise
+        obs = np.concatenate([np.asarray(pos_robot[:2]),
+                              np.asarray(vel_robot_lin[:2]),
+                              pos_object_COM,
+                              vel_object])
+
+        obs += np.random.normal(scale=0.001, size=8)
+
+        return obs
 
 if __name__ == '__main__':
     # for some basic tests

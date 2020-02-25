@@ -248,7 +248,7 @@ class alpaca:
         rw = []
         final_y = []
         final_x = []
-        termination = np.zeros(8)
+        termination = np.zeros(self.FLAGS.state_space)
 
         for dy in range(3): # displacement_y
             for ey in range(3): # offset_EE_y
@@ -434,8 +434,7 @@ class alpaca:
         ax[1].set_xlim([0, 0.8])
         ax[1].set_ylim([0, 0.8])
         plt.savefig(self.policy_dir+ '/Rollout_'+ str(self.episode))
-        plt.show()
-
+        plt.close()
 
 
     def _reset(self):
@@ -599,10 +598,15 @@ class alpaca:
                 value=[tf.Summary.Value(tag='Performance/Loss_KLdiv', simple_value=(lossklBuffer / self.batch_size))])
             loss_summary = tf.Summary(
                 value=[tf.Summary.Value(tag='Performance/Loss', simple_value=(lossBuffer / self.batch_size))])
+            precision = self.sess.run(self.Qmain.L0_asym)
+            max_ev_summary = tf.Summary(value=[tf.Summary.Value(tag='Parameters/Max Eigen', simple_value=np.max(precision))])
+            min_ev_summary = tf.Summary(value=[tf.Summary.Value(tag='Parameters/Min Eigen', simple_value=np.min(precision))])
 
             self.summary_writer.add_summary(loss_summary, self.episode)
             self.summary_writer.add_summary(lossreg_summary, self.episode)
             self.summary_writer.add_summary(losskl_summary, self.episode)
+            self.summary_writer.add_summary(max_ev_summary, self.episode)
+            self.summary_writer.add_summary(min_ev_summary, self.episode)
             self.summary_writer.add_summary(summaries_gradvar, self.episode)
 
             self.summary_writer.flush()
