@@ -121,7 +121,7 @@ class PushEnv(gym.Env):
         # calculate reward 0.01
         #reward = 10.* self.rew_scale / (self.rew_scale + np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)) # 1/ dist(object_to_target)
         # TODO: issue is that at some point EE-COM distance will dominate (which includes the offset)
-        reward = -np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)-  np.linalg.norm(obs[4:6])
+        reward = -np.linalg.norm(obs[:2]+ obs[4:6]- self.target_position)-  np.linalg.norm(obs[4:6])
 
         done = False
 

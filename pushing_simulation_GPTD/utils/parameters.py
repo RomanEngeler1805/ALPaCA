@@ -12,7 +12,7 @@ def parameters():
 
     # architecture
     tf.flags.DEFINE_integer("hidden_space", 64, "Dimensionality of hidden space")
-    tf.flags.DEFINE_integer("latent_space", 8, "Dimensionality of latent space")
+    tf.flags.DEFINE_integer("latent_space", 4, "Dimensionality of latent space")
     tf.flags.DEFINE_string('non_linearity', 'leaky_relu', 'Non-linearity used in encoder')
     tf.flags.DEFINE_integer("nstep", 1, "n-step TD return")
 
@@ -23,7 +23,7 @@ def parameters():
     # posterior
     tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
     tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
-    tf.flags.DEFINE_float("noise_precmax", 30.0, "Maximum noise precision (1/var)")
+    tf.flags.DEFINE_float("noise_precmax", 0.1, "Maximum noise precision (1/var)")
     tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
     tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 
@@ -53,7 +53,7 @@ def parameters():
     tf.flags.DEFINE_float("rew_norm", 1e-2, "Normalization factor for reward")
 
     # memory
-    tf.flags.DEFINE_integer("replay_memory_size", 10000, "Size of replay memory")
+    tf.flags.DEFINE_integer("replay_memory_size", 5000, "Size of replay memory")
     tf.flags.DEFINE_integer("iter_amax", 1, "Number of iterations performed to determine amax")
     tf.flags.DEFINE_integer("save_frequency", 500, "Store images every N-th episode")
 

@@ -206,13 +206,14 @@ class alpaca:
                 self.split_ratio = np.min([self.split_ratio + 0.003, self.FLAGS.split_ratio_max])
 
             # evaluation
-            if self.episode % 500 == 0:
+            if self.episode % self.FLAGS.save_frequency == 0:
                 print('AVG time env: ' + str(time_env))
                 print('AVG time sgd: ' + str(time_sgd))
 
                 print('Evaluation ...')
                 self._evaluate()
                 self._prior_rollouts()
+                self._posterior_rollouts()
                 self._summary()
                 print('Training ...')
 
@@ -419,6 +420,7 @@ class alpaca:
 
             buffer.append(self.evalbuffer.buffer)
 
+        # plot
         fig, ax = plt.subplots(ncols=2, figsize=[10, 4])
         ax[0].set_title('End-Effector')
         ax[1].set_title('Object')
@@ -435,6 +437,105 @@ class alpaca:
         ax[1].set_ylim([0, 0.8])
         plt.savefig(self.policy_dir+ '/Rollout_'+ str(self.episode))
         plt.close()
+
+        del buffer
+
+
+    def _posterior_rollouts(self):
+        '''
+        function to plot rollouts of posterior (i.e. w/ posterior updates)
+        '''
+
+        # define configurations to test
+        displacement_x = 0.03
+        displacement_y = 0.5 * self.env.maxp
+        offset_EE_y = 0.
+        offset_COM_y = 0.
+
+
+        # single rollout of prior (gather data)
+        self.tempbuffer.reset()
+        w0_bar = self.sess.run(self.Qmain.w0_bar)
+
+        # configurations
+        base_state = self.env.reset(displacement_x,
+                                    displacement_y,
+                                    offset_EE_y,
+                                    offset_COM_y)
+
+        # regular loop over trajectory
+        for base_step in range(self.FLAGS.L_episode):
+            Qbase = np.einsum('lm,bla->ba', w0_bar, self.sess.run(self.Qmain.phi, feed_dict={self.Qmain.state: base_state.reshape(-1, self.FLAGS.state_space)}))
+            base_action = np.argmax(Qbase[0])
+
+            base_next_state, base_reward, base_done, _ = self.env.step(base_action)
+
+            # store experience in memory
+            new_experience = [base_state, base_action, base_reward, base_next_state, base_done]
+            self.tempbuffer.add(new_experience)
+
+            base_state = base_next_state.copy()
+
+            if base_done:
+                break
+
+            # update posterior
+            if (base_step + 1) % self.FLAGS.update_freq_post == 0 and base_step < self.split_ratio* self.FLAGS.L_episode:
+                # rollouts (start to end)
+                buffer = []
+
+                for _ in np.arange(10):
+                    mini_buffer = []
+
+                    #
+                    self._posterior()
+
+                    env = PushEnv()
+                    env.rew_scale = self.FLAGS.rew_norm
+
+                    # configurations
+                    state = env.reset(displacement_x,
+                                      displacement_y,
+                                      offset_EE_y,
+                                      offset_COM_y)
+
+                    for step in range(self.FLAGS.L_episode):
+                        # take a step
+                        Qval = self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: state.reshape(-1, self.FLAGS.state_space)})[0]
+                        action = np.argmax(Qval)
+                        next_state, reward, done, _ = env.step(action)
+
+                        # store experience in memory
+                        mini_buffer.append(state)
+
+                        # update state, and counters
+                        state = next_state.copy()
+
+                        if done:
+                            break
+
+                    buffer.append(mini_buffer)
+
+                # plot
+                fig, ax = plt.subplots(ncols=2, figsize=[10, 4])
+                ax[0].set_title('End-Effector')
+                ax[1].set_title('Object')
+
+                for num, rollout in enumerate(buffer):
+                    rollout = np.asarray(rollout)
+                    ax[0].plot(rollout[:,0], rollout[:,1], color=plt.cm.cool(num* 25))
+                    ax[1].plot(rollout[:,0]+ rollout[:,4],
+                               rollout[:,1]+ rollout[:,5],
+                               color=plt.cm.cool(num* 25))
+
+                ax[0].set_xlim([0, 0.8])
+                ax[0].set_ylim([0, 0.8])
+                ax[1].set_xlim([0, 0.8])
+                ax[1].set_ylim([0, 0.8])
+                plt.savefig(self.policy_dir+ '/Rollout_'+ str(self.episode)+'_horizon_'+ str(base_step))
+                plt.close()
+
+        del buffer, mini_buffer
 
 
     def _reset(self):
