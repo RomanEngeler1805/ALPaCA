@@ -23,7 +23,7 @@ def parameters():
     # posterior
     tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
     tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
-    tf.flags.DEFINE_float("noise_precmax", 0.1, "Maximum noise precision (1/var)")
+    tf.flags.DEFINE_float("noise_precmax", 1.0, "Maximum noise precision (1/var)")
     tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
     tf.flags.DEFINE_float("noise_precstep", 1.001, "Step of noise precision s*=ds")
 

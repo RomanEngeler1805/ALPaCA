@@ -378,6 +378,13 @@ class alpaca:
         policy_plot(sess, QNet, tempbuffer, FLAGS, episode, base_dir)
         '''
 
+    def _prior_Value(self):
+        '''
+        prior value fcn for zero velocities, object offset [0.03, 0.]
+        '''
+        w0_bar,
+        pass
+
     def _prior_rollouts(self):
         '''
         function to plot rollouts of prior (i.e. w/o posterior updates)
@@ -484,14 +491,14 @@ class alpaca:
                 # rollouts (start to end)
                 buffer = []
 
+                env = PushEnv()
+                env.rew_scale = self.FLAGS.rew_norm
+
                 for _ in np.arange(10):
                     mini_buffer = []
 
                     #
                     self._posterior()
-
-                    env = PushEnv()
-                    env.rew_scale = self.FLAGS.rew_norm
 
                     # configurations
                     state = env.reset(displacement_x,
@@ -535,7 +542,7 @@ class alpaca:
                 plt.savefig(self.policy_dir+ '/Rollout_'+ str(self.episode)+'_horizon_'+ str(base_step))
                 plt.close()
 
-        del buffer, mini_buffer
+        del buffer, mini_buffer, env
 
 
     def _reset(self):
