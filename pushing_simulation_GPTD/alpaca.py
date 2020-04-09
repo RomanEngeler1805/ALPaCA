@@ -66,6 +66,8 @@ class alpaca:
         self.sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
         self.Qmain = QNetwork(FLAGS, scope='QNetwork')  # neural network
         self.Qtarget = QNetwork(FLAGS, scope='TargetNetwork')
+        self.Qdata =  QNetwork(FLAGS, scope='DataNetwork')
+
         init = tf.global_variables_initializer()
         self.sess.run(init)
 
@@ -95,16 +97,16 @@ class alpaca:
         create_dictionary(self.model_dir)
 
         # folders for plotting
-        base_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y')
-        self.reward_dir = base_dir + '/Reward/'
+        self.base_dir = './figures/' + time.strftime('%H-%M-%d_%m-%y')
+        self.reward_dir = self.base_dir + '/Reward/'
         create_dictionary(self.reward_dir)
-        self.trajectory_dir = base_dir + '/Trajectories/'
+        self.trajectory_dir = self.base_dir + '/Trajectories/'
         create_dictionary(self.trajectory_dir)
-        self.Qprior = base_dir + '/Qprior/'
+        self.Qprior = self.base_dir + '/Qprior/'
         create_dictionary(self.Qprior)
-        self.Qposterior_dir = base_dir + '/Qposterior/'
+        self.Qposterior_dir = self.base_dir + '/Qposterior/'
         create_dictionary(self.Qposterior_dir)
-        self.policy_dir = base_dir + '/Policy/'
+        self.policy_dir = self.base_dir + '/Policy/'
         create_dictionary(self.policy_dir)
 
         # statistics
@@ -210,8 +212,15 @@ class alpaca:
                 print('AVG time env: ' + str(time_env))
                 print('AVG time sgd: ' + str(time_sgd))
 
+                # copy value
+                vars_modelQ = self.sess.run(self.Qmain.tvars)
+                feed_dict = dictionary = dict(zip(self.Qdata.variable_holders, vars_modelQ))
+                feed_dict.update({self.Qdata.tau: 1.0})
+                self.sess.run(self.Qdata.copyParams, feed_dict=feed_dict)
+
                 print('Evaluation ...')
                 self._evaluate()
+                self._evaluate(updates=False)
                 self._prior_rollouts()
                 self._posterior_rollouts()
                 self._summary()
@@ -311,23 +320,25 @@ class alpaca:
         print('p_rob, v_rob, p_obj, v_obj')
         print(termination)
 
+        classifier = '' if updates else '0'
+
         # tensorflow summaries
         rw = np.sum(np.array(rw))/ len(displacement_y)/ len(offset_EE_y)/ len(offset_COM_y)
-        reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation/Episodic Reward', simple_value=rw)])
+        reward_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation'+classifier+'/Episodic Reward', simple_value=rw)])
         target_COM_distance = np.mean(np.array(target_COM_distance))
-        dist_COM_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation/Target COM Distance', simple_value=target_COM_distance)])
+        dist_COM_summary = tf.Summary(value=[tf.Summary.Value(tag='Validation'+classifier+'/Target COM Distance', simple_value=target_COM_distance)])
         target_EE_distance = np.mean(np.array(target_EE_distance))
         dist_EE_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Validation/Target EE Distance', simple_value=target_EE_distance)])
+            value=[tf.Summary.Value(tag='Validation'+classifier+'/Target EE Distance', simple_value=target_EE_distance)])
         EE_COM_distance = np.mean(np.array(EE_COM_distance))
         dist_EE_COM_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Validation/EE COM Distance', simple_value=EE_COM_distance)])
+            value=[tf.Summary.Value(tag='Validation'+classifier+'/EE COM Distance', simple_value=EE_COM_distance)])
         ep_len_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Validation/Episode Length', simple_value=np.mean(np.array(episode_length)))])
+            value=[tf.Summary.Value(tag='Validation'+classifier+'/Episode Length', simple_value=np.mean(np.array(episode_length)))])
         final_x_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Validation/x position', simple_value=np.mean(np.array(final_x)))])
+            value=[tf.Summary.Value(tag='Validation'+classifier+'/x position', simple_value=np.mean(np.array(final_x)))])
         final_y_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Validation/y position', simple_value=np.mean(np.array(final_y)))])
+            value=[tf.Summary.Value(tag='Validation'+classifier+'/y position', simple_value=np.mean(np.array(final_y)))])
         self.summary_writer.add_summary(reward_summary, self.episode)
         self.summary_writer.add_summary(dist_COM_summary, self.episode)
         self.summary_writer.add_summary(dist_EE_summary, self.episode)
@@ -337,46 +348,7 @@ class alpaca:
         self.summary_writer.add_summary(final_y_summary, self.episode)
         self.summary_writer.flush()
 
-        '''
-        # target distance vs COM offset
-        position_object = np.array([state[0] + state[4], state[1] + state[5]])
-        self.COM_training.append([np.linalg.norm(self.env.target_position - position_object),
-                                  np.linalg.norm(self.obj_offset_COM_local)])
 
-        # entropy of action selection
-        _, action_count = np.unique(np.asarray(action_task), return_counts=True)
-        action_prob = 1. * action_count / np.sum(action_count)
-        entropy_episode.append(np.sum([-p * np.log(p) for p in action_prob if p != 0.]))
-
-        # maximum speed of robot arm
-        speed_task = np.asarray(speed_task)
-        max_speed.append(np.max(speed_task) * self.env.control_hz)
-
-        generate_plots(sess, summary_writer, base_dir, tempbuffer, FLAGS, episode)
-
-        Neval = 50
-        #
-        reward_eval_post = 0.
-        for n in range(Neval):
-            reward_eval_post += evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, split_ratio, noise_precision)
-
-        reward_eval_summary = tf.Summary(
-            value=[tf.Summary.Value(tag='Performance2/Eval Reward Posterior',
-                                    simple_value=reward_eval_post / FLAGS.rew_norm)])
-        summary_writer.add_summary(reward_eval_summary, episode)
-
-        #
-        reward_eval_prior = 0.
-        for n in range(Neval):
-            reward_eval_prior += evaluate_Q(QNet, evalbuffer, env, sess, FLAGS, 0., noise_precision)
-
-
-        log.info('Episode %3.d with R %3.d', episode, np.sum(rw))
-
-        # evaluation_plots(sess, QNet, env, tempbuffer, FLAGS, summary_writer, noise_precision, episode, split_ratio, base_dir)
-        value_function_plot(sess, QNet, tempbuffer, FLAGS, episode, base_dir)
-        policy_plot(sess, QNet, tempbuffer, FLAGS, episode, base_dir)
-        '''
 
     def _prior_Value(self):
         '''
@@ -392,7 +364,7 @@ class alpaca:
 
         # define configurations to test
         displacement_x = 0.03
-        displacement_y = 0.5 * self.env.maxp
+        displacement_y = 0.7 * self.env.maxp
         offset_EE_y = 0.
         offset_COM_y = 0.
 
@@ -455,14 +427,12 @@ class alpaca:
 
         # define configurations to test
         displacement_x = 0.03
-        displacement_y = 0.5 * self.env.maxp
+        displacement_y = 0.7 * self.env.maxp
         offset_EE_y = 0.
         offset_COM_y = 0.
 
-
         # single rollout of prior (gather data)
         self.tempbuffer.reset()
-        w0_bar = self.sess.run(self.Qmain.w0_bar)
 
         # configurations
         base_state = self.env.reset(displacement_x,
@@ -472,8 +442,8 @@ class alpaca:
 
         # regular loop over trajectory
         for base_step in range(self.FLAGS.L_episode):
-            Qbase = np.einsum('lm,bla->ba', w0_bar, self.sess.run(self.Qmain.phi, feed_dict={self.Qmain.state: base_state.reshape(-1, self.FLAGS.state_space)}))
-            base_action = np.argmax(Qbase[0])
+            Qval = self.sess.run(self.Qdata.Qout, feed_dict={self.Qdata.state: base_state.reshape(-1, self.FLAGS.state_space)})[0]
+            base_action = np.argmax(Qval)
 
             base_next_state, base_reward, base_done, _ = self.env.step(base_action)
 
@@ -488,6 +458,35 @@ class alpaca:
 
             # update posterior
             if (base_step + 1) % self.FLAGS.update_freq_post == 0 and base_step < self.split_ratio* self.FLAGS.L_episode:
+                # update outer posterior
+                length = len(self.tempbuffer.buffer)
+
+                reward_train = np.zeros([length, ])
+                state_train = np.zeros([length, self.FLAGS.state_space])
+                next_state_train = np.zeros([length, self.FLAGS.state_space])
+                action_train = np.zeros([length, ])
+                done_train = np.zeros([length, ])
+
+                # fill arrays
+                for k, experience in enumerate(self.tempbuffer.buffer):
+                    # [s, a, r, s', a*, d]
+                    state_train[k] = experience[0]
+                    action_train[k] = experience[1]
+                    reward_train[k] = experience[2]
+                    next_state_train[k] = experience[3]
+                    done_train[k] = experience[4]
+
+                # update
+                _, _, _ = self.sess.run([self.Qdata.wt_bar, self.Qdata.Lt_inv, self.Qdata.sample_post],
+                                                  feed_dict={self.Qdata.context_state: state_train,
+                                                             self.Qdata.context_action: action_train,
+                                                             self.Qdata.context_reward: reward_train,
+                                                             self.Qdata.context_state_next: next_state_train,
+                                                             self.Qdata.context_done: done_train,
+                                                             self.Qdata.nprec: self.noise_precision})
+
+
+
                 # rollouts (start to end)
                 buffer = []
 
@@ -497,7 +496,7 @@ class alpaca:
                 for _ in np.arange(10):
                     mini_buffer = []
 
-                    #
+                    # sample posterior
                     self._posterior()
 
                     # configurations
@@ -524,6 +523,8 @@ class alpaca:
                     buffer.append(mini_buffer)
 
                 # plot
+                target_COM_distance = []
+
                 fig, ax = plt.subplots(ncols=2, figsize=[10, 4])
                 ax[0].set_title('End-Effector')
                 ax[1].set_title('Object')
@@ -535,12 +536,25 @@ class alpaca:
                                rollout[:,1]+ rollout[:,5],
                                color=plt.cm.cool(num* 25))
 
+                    target_COM_distance.append(np.linalg.norm(self.env.target_position - rollout[-1,:2] - rollout[-1,4:6]))
+
                 ax[0].set_xlim([0, 0.8])
                 ax[0].set_ylim([0, 0.8])
                 ax[1].set_xlim([0, 0.8])
                 ax[1].set_ylim([0, 0.8])
                 plt.savefig(self.policy_dir+ '/Rollout_'+ str(self.episode)+'_horizon_'+ str(base_step))
                 plt.close()
+
+                # track target distance (mean and variance)
+                mean_target_distance = np.mean(np.asarray(target_COM_distance))
+                std_target_distance = np.std(np.asarray(target_COM_distance))
+
+                # Create the pandas DataFrame
+                data = [[self.episode, mean_target_distance, std_target_distance]]
+                df = pd.DataFrame(data, columns=['Epoch', 'Mean', 'Std'])
+                df.to_csv(self.base_dir + '/target_dist' + str(base_step), index=False, header=False, mode='a')
+
+                del df
 
         del buffer, mini_buffer, env
 
@@ -696,7 +710,7 @@ class alpaca:
         feed_dict.update({self.Qmain.lr_placeholder: self.learning_rate})
 
         # reduce summary size
-        if self.episode % 10 == 0:
+        if self.episode % 100 == 0:
 
             # update summary
             _, summaries_gradvar = self.sess.run([self.Qmain.updateModel, self.Qmain.summaries_gradvar], feed_dict=feed_dict)
