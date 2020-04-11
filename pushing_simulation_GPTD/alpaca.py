@@ -247,7 +247,7 @@ class alpaca:
         displacement_x = 0.03
         displacement_y = (0.3+ np.array([0., 0.5, 1.])* 0.4) * self.env.maxp
         offset_EE_y = 0.01 * (-0.5 + np.array([0., 0.5, 1.]))
-        offset_COM_y = 0.02 * (-1. + 2. * np.array([0., 0.5, 1.]))
+        offset_COM_y = 0.03 * (-1. + 2. * np.array([0., 0.5, 1.]))
 
         target_COM_distance = []  # distance to target
         target_EE_distance = []
@@ -366,7 +366,7 @@ class alpaca:
         displacement_x = 0.03
         displacement_y = 0.7 * self.env.maxp
         offset_EE_y = 0.
-        offset_COM_y = 0.
+        offset_COM_y = 0.02
 
         #
         buffer = []
@@ -374,7 +374,7 @@ class alpaca:
         # rollouts
         for _ in np.arange(10):
             self.evalbuffer.reset()
-            self.sess.run(self.Qmain.sample_prior)
+            self.sess.run(self.Qdata.sample_prior)
 
             # configurations
             state = self.env.reset(displacement_x,
@@ -384,7 +384,7 @@ class alpaca:
 
             for step in range(self.FLAGS.L_episode):
                 # take a step
-                Qval = self.sess.run(self.Qmain.Qout, feed_dict={self.Qmain.state: state.reshape(-1, self.FLAGS.state_space)})[0]
+                Qval = self.sess.run(self.Qdata.Qout, feed_dict={self.Qdata.state: state.reshape(-1, self.FLAGS.state_space)})[0]
                 action = np.argmax(Qval)
                 next_state, reward, done, _ = self.env.step(action)
 
@@ -410,10 +410,10 @@ class alpaca:
                        rollout[:,1]+ rollout[:,5],
                        color=plt.cm.cool(num* 25))
 
-        ax[0].set_xlim([0, 0.8])
-        ax[0].set_ylim([0, 0.8])
-        ax[1].set_xlim([0, 0.8])
-        ax[1].set_ylim([0, 0.8])
+        ax[0].set_xlim([0, self.env.maxp])
+        ax[0].set_ylim([0, self.env.maxp])
+        ax[1].set_xlim([0, self.env.maxp])
+        ax[1].set_ylim([0, self.env.maxp])
         plt.savefig(self.policy_dir+ '/Rollout_'+ str(self.episode))
         plt.close()
 
@@ -429,7 +429,7 @@ class alpaca:
         displacement_x = 0.03
         displacement_y = 0.7 * self.env.maxp
         offset_EE_y = 0.
-        offset_COM_y = 0.
+        offset_COM_y = 0.02
 
         # single rollout of prior (gather data)
         self.tempbuffer.reset()
@@ -439,6 +439,8 @@ class alpaca:
                                     displacement_y,
                                     offset_EE_y,
                                     offset_COM_y)
+
+        self.sess.run(self.Qdata.sample_prior)
 
         # regular loop over trajectory
         for base_step in range(self.FLAGS.L_episode):
@@ -538,10 +540,10 @@ class alpaca:
 
                     target_COM_distance.append(np.linalg.norm(self.env.target_position - rollout[-1,:2] - rollout[-1,4:6]))
 
-                ax[0].set_xlim([0, 0.8])
-                ax[0].set_ylim([0, 0.8])
-                ax[1].set_xlim([0, 0.8])
-                ax[1].set_ylim([0, 0.8])
+                ax[0].set_xlim([0, self.env.maxp])
+                ax[0].set_ylim([0, self.env.maxp])
+                ax[1].set_xlim([0, self.env.maxp])
+                ax[1].set_ylim([0, self.env.maxp])
                 plt.savefig(self.policy_dir+ '/Rollout_'+ str(self.episode)+'_horizon_'+ str(base_step))
                 plt.close()
 
@@ -599,6 +601,8 @@ class alpaca:
         # to accumulate the losses across the batches
         lossBuffer = 0
         lossregBuffer = 0
+        lossBellmannBuffer = 0
+        lossPredVarBuffer = 0
         lossklBuffer = 0
 
         # to accumulate gradients
@@ -672,9 +676,11 @@ class alpaca:
                                                   self.Qtarget.is_online: False})
 
             # update model
-            grads, loss, lossreg, losskl, Qdiff = self.sess.run([self.Qmain.gradients,
+            grads, loss, lossreg, lossBellmann, lossPredVar, losskl, Qdiff = self.sess.run([self.Qmain.gradients,
                                                                  self.Qmain.loss,
                                                                  self.Qmain.loss_reg,
+                                                                self.Qmain.loss1,
+                                                                 self.Qmain.loss2,
                                                                  self.Qmain.loss_kl,
                                                                  self.Qmain.Qdiff],
                                         feed_dict={self.Qmain.context_state: state_train,
@@ -703,6 +709,8 @@ class alpaca:
 
             lossBuffer += loss
             lossregBuffer += lossreg
+            lossPredVarBuffer += lossPredVar
+            lossBellmannBuffer += lossBellmann
             lossklBuffer += losskl
 
         # update summary
@@ -720,12 +728,19 @@ class alpaca:
                 value=[tf.Summary.Value(tag='Performance/Loss_KLdiv', simple_value=(lossklBuffer / self.batch_size))])
             loss_summary = tf.Summary(
                 value=[tf.Summary.Value(tag='Performance/Loss', simple_value=(lossBuffer / self.batch_size))])
+            lossBell_summary = tf.Summary(
+                value=[
+                    tf.Summary.Value(tag='Performance/Loss_Bellmann', simple_value=(lossBellmannBuffer / self.batch_size))])
+            lossVar_summary = tf.Summary(
+                value=[tf.Summary.Value(tag='Performance/Loss_PredVar', simple_value=(lossPredVarBuffer / self.batch_size))])
             precision = self.sess.run(self.Qmain.L0_asym)
             max_ev_summary = tf.Summary(value=[tf.Summary.Value(tag='Parameters/Max Eigen', simple_value=np.max(precision))])
             min_ev_summary = tf.Summary(value=[tf.Summary.Value(tag='Parameters/Min Eigen', simple_value=np.min(precision))])
 
             self.summary_writer.add_summary(loss_summary, self.episode)
             self.summary_writer.add_summary(lossreg_summary, self.episode)
+            self.summary_writer.add_summary(lossBell_summary, self.episode)
+            self.summary_writer.add_summary(lossVar_summary, self.episode)
             self.summary_writer.add_summary(losskl_summary, self.episode)
             self.summary_writer.add_summary(max_ev_summary, self.episode)
             self.summary_writer.add_summary(min_ev_summary, self.episode)

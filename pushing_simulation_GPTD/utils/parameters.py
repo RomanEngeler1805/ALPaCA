@@ -23,14 +23,14 @@ def parameters():
     # posterior
     tf.flags.DEFINE_float("prior_precision", 0.1, "Prior precision (1/var)")
     tf.flags.DEFINE_float("noise_precision", 0.1, "Noise precision (1/var)")
-    tf.flags.DEFINE_float("noise_precmax", 1.0, "Maximum noise precision (1/var)")
+    tf.flags.DEFINE_float("noise_precmax", 0.1, "Maximum noise precision (1/var)")
     tf.flags.DEFINE_integer("noise_Ndrop", 1, "Increase noise precision every N steps")
     tf.flags.DEFINE_float("noise_precstep", 1.0, "Step of noise precision s*=ds")
 
     tf.flags.DEFINE_integer("split_N", 20, "Increase split ratio every N steps")
-    tf.flags.DEFINE_float("split_ratio", 0.60, "Initial split ratio for conditioning")
-    tf.flags.DEFINE_float("split_ratio_max", 0.60, "Maximum split ratio for conditioning")
-    tf.flags.DEFINE_integer("update_freq_post", 5, "Update frequency of posterior and sampling of new policy")
+    tf.flags.DEFINE_float("split_ratio", 0.6, "Initial split ratio for conditioning")
+    tf.flags.DEFINE_float("split_ratio_max", 0.6, "Maximum split ratio for conditioning")
+    tf.flags.DEFINE_integer("update_freq_post", 8, "Update frequency of posterior and sampling of new policy")
 
     # exploration
     tf.flags.DEFINE_float("eps_initial", 0., "Initial value for epsilon-greedy")

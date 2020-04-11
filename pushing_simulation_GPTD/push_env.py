@@ -74,8 +74,8 @@ class PushEnv(gym.Env):
         if displacement_x is None:
             displacement_x = 0.02 + 0.15 * np.random.rand()  # x position of EE
             displacement_y = (0.3+ np.random.rand()* 0.4) * self.maxp # y position of EE
-            offset_EE_y = 0.005*(-1. + 2.* np.random.rand())
-            offset_COM_y = 0.02 * (-1. + 2. * np.random.rand()) # XXXX
+            offset_EE_y = 0.01*(-1. + 2.* np.random.rand())
+            offset_COM_y = 0.03 * (-1. + 2. * np.random.rand())
 
         # load manipulation object
         self.object_id = p.loadURDF("urdfs/cuboid1.urdf", [0.03+ displacement_x, displacement_y, 0.01])
@@ -155,7 +155,7 @@ class PushEnv(gym.Env):
                               pos_object_COM,
                               vel_object])
 
-        obs += np.random.normal(scale=0.001, size=8)
+        obs += np.random.normal(scale=0.001, size=len(self.low))
 
         return obs
 
