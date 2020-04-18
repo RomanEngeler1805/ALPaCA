@@ -75,7 +75,7 @@ class PushEnv(gym.Env):
             displacement_x = 0.02 + 0.15 * np.random.rand()  # x position of EE
             displacement_y = (0.3+ np.random.rand()* 0.4) * self.maxp # y position of EE
             offset_EE_y = 0.01*(-1. + 2.* np.random.rand())
-            offset_COM_y = 0.03 * (-1. + 2. * np.random.rand())
+            offset_COM_y = 0.03* (-1. + 2. * np.random.rand())
 
         # load manipulation object
         self.object_id = p.loadURDF("urdfs/cuboid1.urdf", [0.03+ displacement_x, displacement_y, 0.01])
@@ -121,7 +121,7 @@ class PushEnv(gym.Env):
         # calculate reward 0.01
         #reward = 10.* self.rew_scale / (self.rew_scale + np.linalg.norm(obs[:2]+ obs[4:6] - self.target_position)) # 1/ dist(object_to_target)
         # TODO: issue is that at some point EE-COM distance will dominate (which includes the offset)
-        reward = -np.linalg.norm(obs[:2]+ obs[4:6]- self.target_position)-  np.linalg.norm(obs[4:6])
+        reward = -np.linalg.norm(obs[:2]+ obs[4:6]- self.target_position)- np.linalg.norm(obs[4:6])
 
         done = False
 

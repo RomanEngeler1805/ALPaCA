@@ -59,6 +59,7 @@ class alpaca:
 
         # memory
         self.fullbuffer = prioritized_replay_buffer(FLAGS.replay_memory_size)  # large buffer to store all experience
+        #self.fullbuffer.load('/home/roman/Daten/MT/ALPaCa/pushing_simulation_GPTD/figures/replaybuffer.npz')
         self.tempbuffer = replay_buffer(FLAGS.L_episode)  # standard buffer for training (episode)
         self.evalbuffer = replay_buffer(FLAGS.L_episode)  # standard buffer for validation
 
@@ -556,14 +557,12 @@ class alpaca:
                 df = pd.DataFrame(data, columns=['Epoch', 'Mean', 'Std'])
                 df.to_csv(self.base_dir + '/target_dist' + str(base_step), index=False, header=False, mode='a')
 
-                del df
-
-        del buffer, mini_buffer, env
+                del df, env, buffer, mini_buffer
 
 
     def _reset(self):
         self.sess.close()
-        self.fullbuffer.reset()
+        self.fullbuffer.reset(filename=self.base_dir+'/replaybuffer')
         self.tempbuffer.reset()
         self.evalbuffer.reset()
 
@@ -660,6 +659,7 @@ class alpaca:
                                                   self.Qmain.state: state_valid,
                                                   self.Qmain.state_next: next_state_valid,
                                                   self.Qmain.nprec: self.noise_precision,
+                                                  self.Qmain.episode: self.episode%2,
                                                   self.Qmain.is_online: False})
 
             # evaluate target model
@@ -673,6 +673,7 @@ class alpaca:
                                                   self.Qtarget.state_next: next_state_valid,
                                                   self.Qtarget.amax_online: amax_online,
                                                   self.Qtarget.nprec: self.noise_precision,
+                                                  self.Qtarget.episode: self.episode%2,
                                                   self.Qtarget.is_online: False})
 
             # update model
@@ -697,6 +698,7 @@ class alpaca:
                                                    self.Qmain.Qmax_online: Qmax_target,
                                                    self.Qmain.lr_placeholder: self.learning_rate,
                                                    self.Qmain.nprec: self.noise_precision,
+                                                   self.Qmain.episode: self.episode%2,
                                                    self.Qmain.is_online: False})
 
             # update prioritized replay

@@ -47,3 +47,9 @@ class Memory:  # stored as ( s, a, r, s_ ) in SumTree
     def update(self, idx, error):
         p = self._get_priority(error)
         self.tree.update(idx, p)
+
+    def reset(self, filename):
+        self.tree.save(filename)
+
+    def load(self, filename):
+        self.tree.load(filename)

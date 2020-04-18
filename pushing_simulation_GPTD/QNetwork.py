@@ -28,6 +28,7 @@ class QNetwork():
             self.activation = tf.nn.leaky_relu
         elif FLAGS.non_linearity == 'selu':
             self.activation = tf.nn.selu
+
         else:
             self.activation = tf.nn.relu
 
@@ -72,6 +73,7 @@ class QNetwork():
         self.tau = tf.placeholder(shape=[], dtype=tf.float32, name='tau')
         self.nprec = tf.placeholder(shape=[], dtype=tf.float32, name='noise_precision')
         self.is_online = tf.placeholder_with_default(False, shape=[], name='is_online')
+        self.episode = tf.placeholder_with_default(False, shape=[], name='episode')
 
         # placeholders predictive data ====================================================
         with tf.variable_scope("prediction", reuse=tf.AUTO_REUSE):
@@ -185,6 +187,24 @@ class QNetwork():
 
             # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             '''
+            # alternating training
+            self.wt_bar = tf.cond(self.episode,
+                                  lambda: tf.stop_gradient(self.wt_bar),
+                                  lambda: self.wt_bar)
+
+            self.Lt_inv = tf.cond(self.episode,
+                                  lambda: tf.stop_gradient(self.Lt_inv),
+                                  lambda: self.Lt_inv)
+
+            phi_taken = tf.cond(self.episode,
+                                  lambda: phi_taken,
+                                  lambda: tf.stop_gradient(phi_taken))
+
+            self.phi_next = tf.cond(self.episode,
+                                  lambda: self.phi_next,
+                                  lambda: tf.stop_gradient(self.phi_next))
+
+
             # Q values
             self.Qcurr = tf.einsum('lm,bl->b', self.wt_bar, phi_taken, name='Qtaken')
             self.Qnext = tf.einsum('lm,bla->ba', self.wt_bar, self.phi_next, name='Qnext')

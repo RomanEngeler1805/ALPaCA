@@ -61,3 +61,12 @@ class SumTree:
         dataIdx = idx - self.capacity + 1
 
         return (idx, self.tree[idx], self.data[dataIdx])
+
+    def save(self, filename):
+        numpy.savez(filename, self.tree, self.data, self.n_entries)
+
+    def load(self, filename):
+        load_data = numpy.load(filename)
+        self.tree = load_data['arr_0']
+        self.data = load_data['arr_1']
+        self.n_entries = load_data['arr_2']
